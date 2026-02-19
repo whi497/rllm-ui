@@ -1,0 +1,613 @@
+import json
+import sqlite3
+import uuid
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+from .base import DataStore, extract_searchable_text
+
+
+class SQLiteStore(DataStore):
+    def __init__(self, db_path: str = "rllm_ui.db"):
+        self.db_path = Path(__file__).parent.parent / db_path
+
+    @contextmanager
+    def _get_conn(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def init_db(self):
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+
+            # Projects table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Sessions table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    experiment TEXT NOT NULL,
+                    config JSON,
+                    source_metadata JSON,
+                    color TEXT,
+                    status TEXT DEFAULT 'running',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    last_heartbeat_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Metrics table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+                    step INTEGER,
+                    data JSON,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Episodes table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS episodes (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+                    step INTEGER,
+                    task JSON,
+                    is_correct BOOLEAN,
+                    reward REAL,
+                    termination_reason TEXT,
+                    trajectories JSON,
+                    metrics JSON,
+                    info JSON,
+                    search_text TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Logs table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+                    timestamp TEXT NOT NULL,
+                    stream TEXT NOT NULL DEFAULT 'stdout',
+                    message TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Trajectory groups table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS trajectory_groups (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+                    step INTEGER,
+                    group_id TEXT,
+                    task_id TEXT,
+                    trajectory_name TEXT,
+                    num_trajectories INTEGER,
+                    avg_reward REAL,
+                    correct_count INTEGER,
+                    total_count INTEGER,
+                    metadata JSON,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            conn.commit()
+
+    def reset(self):
+        if self.db_path.exists():
+            self.db_path.unlink()
+        self.init_db()
+
+    # ── Project methods ──────────────────────────────────────────────
+
+    def get_or_create_project(self, name: str) -> str:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT id FROM projects WHERE name = ?", (name,)).fetchone()
+            if row:
+                return row["id"]
+            project_id = str(uuid.uuid4())
+            conn.execute("INSERT INTO projects (id, name) VALUES (?, ?)", (project_id, name))
+            conn.commit()
+            return project_id
+
+    def get_project(self, project_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if row:
+                return dict(row)
+        return None
+
+    def rename_project(self, project_id: str, new_name: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if not row:
+                return None
+            # Check for name conflict
+            existing = conn.execute("SELECT id FROM projects WHERE name = ? AND id != ?", (new_name, project_id)).fetchone()
+            if existing:
+                raise ValueError(f"Project name '{new_name}' already exists")
+            conn.execute("UPDATE projects SET name = ? WHERE id = ?", (new_name, project_id))
+            conn.commit()
+            return dict(conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone())
+
+    def delete_project(self, project_id: str) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if not row:
+                return False
+            conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            conn.commit()
+            return True
+
+    def update_session(self, session_id: str, experiment: str | None = None, color: str | None = None) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if not row:
+                return None
+            if experiment is not None:
+                conn.execute("UPDATE sessions SET experiment = ? WHERE id = ?", (experiment, session_id))
+            if color is not None:
+                conn.execute("UPDATE sessions SET color = ? WHERE id = ?", (color, session_id))
+            conn.commit()
+        return self.get_session(session_id)
+
+    def delete_session(self, session_id: str) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if not row:
+                return False
+            conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            conn.commit()
+            return True
+
+    # ── Session methods ──────────────────────────────────────────────
+
+    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any]) -> str:
+        project_id = self.get_or_create_project(project)
+        session_id = str(uuid.uuid4())
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO sessions (id, project_id, experiment, config, source_metadata) VALUES (?, ?, ?, ?, ?)",
+                (session_id, project_id, experiment, json.dumps(config), json.dumps(source_metadata)),
+            )
+            conn.commit()
+        return session_id
+
+    def log_metrics(self, session_id: str, step: int, data: dict[str, Any]) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            cursor = conn.execute("INSERT INTO metrics (session_id, step, data) VALUES (?, ?, ?)", (session_id, step, json.dumps(data)))
+            conn.commit()
+            metric_id = cursor.lastrowid
+            row = conn.execute("SELECT * FROM metrics WHERE id = ?", (metric_id,)).fetchone()
+            if row:
+                d = dict(row)
+                if d["data"]:
+                    d["data"] = json.loads(d["data"])
+                return d
+        return None
+
+    def append_episode(self, session_id: str, episode_data: dict[str, Any]):
+        ep_id = episode_data.get("episode_id")
+        step = episode_data.get("step")
+        task = json.dumps(episode_data.get("task"))
+        is_correct = episode_data.get("is_correct")
+        reward = episode_data.get("reward")
+        termination_reason = episode_data.get("termination_reason")
+        trajectories = json.dumps(episode_data.get("trajectories", []))
+        metrics = json.dumps(episode_data.get("metrics"))
+        info = json.dumps(episode_data.get("info"))
+
+        search_text = extract_searchable_text(episode_data)
+
+        with self._get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO episodes (id, session_id, step, task, is_correct, reward, termination_reason, trajectories, metrics, info, search_text)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ep_id, session_id, step, task, is_correct, reward, termination_reason, trajectories, metrics, info, search_text),
+            )
+            conn.commit()
+
+    def get_session(self, session_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT s.*, p.name AS project FROM sessions s JOIN projects p ON s.project_id = p.id WHERE s.id = ?",
+                (session_id,),
+            ).fetchone()
+            if row:
+                d = dict(row)
+                if d["config"]:
+                    d["config"] = json.loads(d["config"])
+                if d["source_metadata"]:
+                    d["source_metadata"] = json.loads(d["source_metadata"])
+                return d
+        return None
+
+    def get_all_sessions(self) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT s.*, p.name AS project FROM sessions s JOIN projects p ON s.project_id = p.id ORDER BY s.created_at DESC"
+            ).fetchall()
+            results = []
+            for row in rows:
+                d = dict(row)
+                if d["config"]:
+                    d["config"] = json.loads(d["config"])
+                try:
+                    if d.get("source_metadata"):
+                        d["source_metadata"] = json.loads(d["source_metadata"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                results.append(d)
+            return results
+
+    def complete_session(self, session_id: str, status: str = "completed") -> dict[str, Any] | None:
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC).isoformat()
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE sessions SET completed_at = ?, status = ? WHERE id = ?",
+                (now, status, session_id),
+            )
+            conn.commit()
+            return self.get_session(session_id)
+
+    def heartbeat_session(self, session_id: str) -> bool:
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC).isoformat()
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?",
+                (now, session_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def mark_crashed_sessions(self, timeout_seconds: int = 300) -> int:
+        from datetime import UTC, datetime, timedelta
+
+        now = datetime.now(UTC)
+        cutoff = (now - timedelta(seconds=timeout_seconds)).isoformat()
+        now_iso = now.isoformat()
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "UPDATE sessions SET status = 'crashed', completed_at = ? WHERE status = 'running' AND last_heartbeat_at < ?",
+                (now_iso, cutoff),
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    def get_metrics(self, session_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT * FROM metrics WHERE session_id = ? ORDER BY step", (session_id,)).fetchall()
+            results = []
+            for row in rows:
+                d = dict(row)
+                if d["data"]:
+                    d["data"] = json.loads(d["data"])
+                results.append(d)
+            return results
+
+    def get_new_metrics(self, session_id: str, last_id: int) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT * FROM metrics WHERE session_id = ? AND id > ? ORDER BY id", (session_id, last_id)).fetchall()
+            results = []
+            for row in rows:
+                d = dict(row)
+                if d["data"]:
+                    d["data"] = json.loads(d["data"])
+                results.append(d)
+            return results
+
+    def get_episodes(self, session_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT * FROM episodes WHERE session_id = ? ORDER BY step", (session_id,)).fetchall()
+            results = []
+            for row in rows:
+                d = dict(row)
+                if d.get("trajectories") and isinstance(d["trajectories"], str):
+                    d["trajectories"] = json.loads(d["trajectories"])
+                else:
+                    d.setdefault("trajectories", [])
+                if d.get("metrics") and isinstance(d["metrics"], str):
+                    d["metrics"] = json.loads(d["metrics"])
+                else:
+                    d.setdefault("metrics", {})
+                if d.get("info") and isinstance(d["info"], str):
+                    d["info"] = json.loads(d["info"])
+                if d["task"]:
+                    d["task"] = json.loads(d["task"])
+                results.append(d)
+            return results
+
+    def get_episode(self, episode_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM episodes WHERE id = ?", (episode_id,)).fetchone()
+            if row:
+                d = dict(row)
+                if d.get("trajectories") and isinstance(d["trajectories"], str):
+                    d["trajectories"] = json.loads(d["trajectories"])
+                else:
+                    d.setdefault("trajectories", [])
+                if d.get("metrics") and isinstance(d["metrics"], str):
+                    d["metrics"] = json.loads(d["metrics"])
+                else:
+                    d.setdefault("metrics", {})
+                if d.get("info") and isinstance(d["info"], str):
+                    d["info"] = json.loads(d["info"])
+                if d["task"]:
+                    d["task"] = json.loads(d["task"])
+                return d
+        return None
+
+    def search_episodes(self, query: str, session_id: str | None = None, limit: int = 50, step: int | None = None) -> dict[str, Any]:
+        with self._get_conn() as conn:
+            sql = "SELECT * FROM episodes WHERE search_text LIKE ?"
+            params: list = [f"%{query}%"]
+
+            if session_id:
+                sql += " AND session_id = ?"
+                params.append(session_id)
+
+            if step is not None:
+                sql += " AND step = ?"
+                params.append(step)
+
+            sql += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+
+            rows = conn.execute(sql, params).fetchall()
+            results = []
+            for row in rows:
+                d = dict(row)
+                if d.get("trajectories") and isinstance(d["trajectories"], str):
+                    d["trajectories"] = json.loads(d["trajectories"])
+                else:
+                    d.setdefault("trajectories", [])
+                if d.get("metrics") and isinstance(d["metrics"], str):
+                    d["metrics"] = json.loads(d["metrics"])
+                else:
+                    d.setdefault("metrics", {})
+                if d.get("info") and isinstance(d["info"], str):
+                    d["info"] = json.loads(d["info"])
+                if d["task"]:
+                    d["task"] = json.loads(d["task"])
+                results.append(d)
+
+            matched_terms = query.lower().split()
+
+            return {
+                "episodes": results,
+                "matched_terms": matched_terms,
+            }
+
+    def search_trajectory_groups(self, query: str, session_id: str | None = None,
+                                  limit: int = 50, step: int | None = None) -> dict[str, Any]:
+        like_q = f"%{query}%"
+        with self._get_conn() as conn:
+            sql = """
+                SELECT DISTINCT tg.* FROM trajectory_groups tg
+                WHERE (
+                    tg.task_id LIKE ? OR tg.trajectory_name LIKE ? OR tg.group_id LIKE ?
+                    OR EXISTS (
+                        SELECT 1 FROM json_each(tg.metadata) AS m
+                        JOIN episodes e ON json_extract(m.value, '$.episode_id') = e.id
+                        WHERE e.search_text LIKE ?
+                    )
+                )
+            """
+            params: list = [like_q, like_q, like_q, like_q]
+
+            if session_id:
+                sql += " AND tg.session_id = ?"
+                params.append(session_id)
+
+            if step is not None:
+                sql += " AND tg.step = ?"
+                params.append(step)
+
+            sql += " ORDER BY tg.created_at LIMIT ?"
+            params.append(limit)
+
+            rows = conn.execute(sql, params).fetchall()
+            results = []
+            for row in rows:
+                d = dict(row)
+                if d.get("metadata"):
+                    d["metadata"] = json.loads(d["metadata"])
+                else:
+                    d["metadata"] = []
+                results.append(d)
+
+            return {
+                "groups": results,
+                "matched_terms": query.lower().split(),
+            }
+
+    def append_trajectory_group(self, session_id: str, group_data: dict[str, Any]):
+        group_id = group_data.get("group_id", "")
+        parts = group_id.split(":", 1)
+        task_id = parts[0] if parts else ""
+        trajectory_name = parts[1] if len(parts) > 1 else ""
+
+        metadata = group_data.get("metadata", [])
+
+        num_trajectories = group_data.get("num_trajectories", len(metadata))
+        avg_reward = group_data.get("avg_reward")
+        correct_count = group_data.get("correct_count", 0)
+        total_count = group_data.get("total_count", len(metadata))
+
+        record_id = str(uuid.uuid4())
+        metadata_json = json.dumps(metadata)
+
+        with self._get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO trajectory_groups
+                (id, session_id, step, group_id, task_id, trajectory_name,
+                 num_trajectories, avg_reward, correct_count, total_count, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record_id,
+                    session_id,
+                    group_data.get("step"),
+                    group_id,
+                    task_id,
+                    trajectory_name,
+                    num_trajectories,
+                    avg_reward,
+                    correct_count,
+                    total_count,
+                    metadata_json,
+                ),
+            )
+            conn.commit()
+
+    def get_trajectory_groups(self, session_id: str, step: int | None = None) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            if step is not None:
+                rows = conn.execute(
+                    "SELECT * FROM trajectory_groups WHERE session_id = ? AND step = ? ORDER BY created_at",
+                    (session_id, step),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM trajectory_groups WHERE session_id = ? ORDER BY step, created_at",
+                    (session_id,),
+                ).fetchall()
+
+            results = []
+            for row in rows:
+                d = dict(row)
+                if d.get("metadata"):
+                    d["metadata"] = json.loads(d["metadata"])
+                else:
+                    d["metadata"] = []
+                results.append(d)
+            return results
+
+    def get_trajectory_group(self, group_id: str, include_trajectories: bool = True) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM trajectory_groups WHERE id = ?", (group_id,)).fetchone()
+            if not row:
+                return None
+
+            d = dict(row)
+
+            if d.get("metadata"):
+                d["metadata"] = json.loads(d["metadata"])
+            else:
+                d["metadata"] = []
+
+            if not include_trajectories:
+                return d
+
+            trajectory_name = d.get("trajectory_name", "")
+            episode_ids = [m.get("episode_id") for m in d["metadata"] if m.get("episode_id")]
+
+            if not episode_ids:
+                d["data"] = {"trajectories": [], "metadata": d["metadata"]}
+                return d
+
+            placeholders = ",".join("?" * len(episode_ids))
+            episode_rows = conn.execute(
+                f"SELECT id, trajectories FROM episodes WHERE id IN ({placeholders})",
+                episode_ids,
+            ).fetchall()
+
+            episode_map = {}
+            for ep_row in episode_rows:
+                trajs = json.loads(ep_row["trajectories"]) if ep_row["trajectories"] else []
+                episode_map[ep_row["id"]] = trajs
+
+            trajectories = []
+            for meta in d["metadata"]:
+                ep_id = meta.get("episode_id")
+                if ep_id and ep_id in episode_map:
+                    ep_trajs = episode_map[ep_id]
+                    for traj in ep_trajs:
+                        if traj.get("name") == trajectory_name:
+                            trajectories.append(traj)
+                            break
+
+            d["data"] = {"trajectories": trajectories, "metadata": d["metadata"]}
+            return d
+
+    def get_projects(self) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            # Get all projects
+            project_rows = conn.execute("SELECT * FROM projects ORDER BY created_at").fetchall()
+            # Get all sessions with project info
+            session_rows = conn.execute(
+                "SELECT s.id, s.project_id, s.experiment, s.status, s.created_at, s.completed_at FROM sessions s ORDER BY s.created_at DESC"
+            ).fetchall()
+
+            # Group sessions by project_id
+            sessions_by_project: dict[str, list] = {}
+            for row in session_rows:
+                d = dict(row)
+                pid = d.pop("project_id")
+                if pid not in sessions_by_project:
+                    sessions_by_project[pid] = []
+                sessions_by_project[pid].append(d)
+
+            results = []
+            for proj_row in project_rows:
+                proj = dict(proj_row)
+                results.append({
+                    "id": proj["id"],
+                    "project": proj["name"],
+                    "sessions": sessions_by_project.get(proj["id"], []),
+                })
+            return results
+
+    def append_log(self, session_id: str, log_data: dict) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO logs (session_id, timestamp, stream, message) VALUES (?, ?, ?, ?)",
+                (session_id, log_data["timestamp"], log_data.get("stream", "stdout"), log_data["message"]),
+            )
+            conn.commit()
+
+    def get_logs(self, session_id: str, stream: str | None = None, limit: int = 1000, offset: int = 0) -> list[dict]:
+        with self._get_conn() as conn:
+            sql = "SELECT * FROM logs WHERE session_id = ?"
+            params: list = [session_id]
+            if stream:
+                sql += " AND stream = ?"
+                params.append(stream)
+            sql += " ORDER BY id LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_new_logs(self, session_id: str, last_id: int) -> list[dict]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM logs WHERE session_id = ? AND id > ? ORDER BY id",
+                (session_id, last_id),
+            ).fetchall()
+            return [dict(row) for row in rows]
