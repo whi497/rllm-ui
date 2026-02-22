@@ -17,3 +17,10 @@ api/.pytest_cache/
 
 # Build/cache
 .vite/
+
+# Hydra outputs
+outputs/
+
+# Coding assistant related
+CLAUDE.md
+.claude/
