@@ -4,7 +4,6 @@ import { useMetricsSSE, useLogsSSE } from "../hooks/useSSE";
 import { RewardChart, getAvailableMetrics } from "./RewardChart";
 import { EpisodePanel } from "./EpisodePanel";
 import { WorkflowDiagram } from "./WorkflowDiagram";
-import { ProgressBar } from "./ProgressBar";
 import { ChatPanel } from "./ChatPanel";
 import { LogsPanel } from "./LogsPanel";
 import { MetricSelectorModal } from "./MetricSelectorModal";
@@ -339,9 +338,6 @@ export const TrainingRunDetail: React.FC = () => {
 
   const latestMetrics =
     metrics.length > 0 ? metrics[metrics.length - 1]?.data : null;
-  const currentEpoch = latestMetrics?.["progress/epoch"] || 0;
-  const totalEpochs = session?.config?.rllm?.trainer?.total_epochs
-    ?? session?.config?.trainer?.total_epochs ?? 0;
   const experimentColor = sessionId ? (colorOverrides[sessionId] || session?.color || getExperimentColor(sessionId)) : undefined;
 
   return (
@@ -425,17 +421,11 @@ export const TrainingRunDetail: React.FC = () => {
             ))}
           </nav>
 
-          {(activeTab === "charts" || activeTab === "training") && metrics.length > 0 && totalEpochs > 0 && (
-            <ProgressBar
-              currentEpoch={currentEpoch}
-              totalEpochs={totalEpochs}
-            />
-          )}
         </div>
       </header>
 
       {/* Content */}
-      <div style={{ height: 'calc(100vh - 148px)', overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflow: 'hidden' }}>
         {activeTab === "charts" ? (
           <MetricsDashboard
             metrics={metrics}
