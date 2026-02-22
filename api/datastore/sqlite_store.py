@@ -70,7 +70,6 @@ class SQLiteStore(DataStore):
                     step INTEGER,
                     task JSON,
                     is_correct BOOLEAN,
-                    reward REAL,
                     termination_reason TEXT,
                     trajectories JSON,
                     metrics JSON,
@@ -103,8 +102,6 @@ class SQLiteStore(DataStore):
                     trajectory_name TEXT,
                     num_trajectories INTEGER,
                     avg_reward REAL,
-                    correct_count INTEGER,
-                    total_count INTEGER,
                     metadata JSON,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -210,7 +207,6 @@ class SQLiteStore(DataStore):
         step = episode_data.get("step")
         task = json.dumps(episode_data.get("task"))
         is_correct = episode_data.get("is_correct")
-        reward = episode_data.get("reward")
         termination_reason = episode_data.get("termination_reason")
         trajectories = json.dumps(episode_data.get("trajectories", []))
         metrics = json.dumps(episode_data.get("metrics"))
@@ -221,10 +217,10 @@ class SQLiteStore(DataStore):
         with self._get_conn() as conn:
             conn.execute(
                 """
-                INSERT INTO episodes (id, session_id, step, task, is_correct, reward, termination_reason, trajectories, metrics, info, search_text)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO episodes (id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, search_text)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (ep_id, session_id, step, task, is_correct, reward, termination_reason, trajectories, metrics, info, search_text),
+                (ep_id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, search_text),
             )
             conn.commit()
 
@@ -362,7 +358,7 @@ class SQLiteStore(DataStore):
                 return d
         return None
 
-    def search_episodes(self, query: str, session_id: str | None = None, limit: int = 50, step: int | None = None) -> dict[str, Any]:
+    def search_episodes(self, query: str, session_id: str | None = None, step: int | None = None) -> dict[str, Any]:
         with self._get_conn() as conn:
             sql = "SELECT * FROM episodes WHERE search_text LIKE ?"
             params: list = [f"%{query}%"]
@@ -375,8 +371,7 @@ class SQLiteStore(DataStore):
                 sql += " AND step = ?"
                 params.append(step)
 
-            sql += " ORDER BY created_at DESC LIMIT ?"
-            params.append(limit)
+            sql += " ORDER BY created_at DESC"
 
             rows = conn.execute(sql, params).fetchall()
             results = []
@@ -404,7 +399,7 @@ class SQLiteStore(DataStore):
             }
 
     def search_trajectory_groups(self, query: str, session_id: str | None = None,
-                                  limit: int = 50, step: int | None = None) -> dict[str, Any]:
+                                  step: int | None = None) -> dict[str, Any]:
         like_q = f"%{query}%"
         with self._get_conn() as conn:
             sql = """
@@ -428,8 +423,7 @@ class SQLiteStore(DataStore):
                 sql += " AND tg.step = ?"
                 params.append(step)
 
-            sql += " ORDER BY tg.created_at LIMIT ?"
-            params.append(limit)
+            sql += " ORDER BY tg.created_at"
 
             rows = conn.execute(sql, params).fetchall()
             results = []
@@ -456,8 +450,6 @@ class SQLiteStore(DataStore):
 
         num_trajectories = group_data.get("num_trajectories", len(metadata))
         avg_reward = group_data.get("avg_reward")
-        correct_count = group_data.get("correct_count", 0)
-        total_count = group_data.get("total_count", len(metadata))
 
         record_id = str(uuid.uuid4())
         metadata_json = json.dumps(metadata)
@@ -467,8 +459,8 @@ class SQLiteStore(DataStore):
                 """
                 INSERT INTO trajectory_groups
                 (id, session_id, step, group_id, task_id, trajectory_name,
-                 num_trajectories, avg_reward, correct_count, total_count, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 num_trajectories, avg_reward, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record_id,
@@ -479,8 +471,6 @@ class SQLiteStore(DataStore):
                     trajectory_name,
                     num_trajectories,
                     avg_reward,
-                    correct_count,
-                    total_count,
                     metadata_json,
                 ),
             )

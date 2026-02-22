@@ -76,7 +76,6 @@ class PostgresStore(DataStore):
                         step INTEGER,
                         task JSONB,
                         is_correct BOOLEAN,
-                        reward REAL,
                         termination_reason TEXT,
                         trajectories JSONB,
                         metrics JSONB,
@@ -125,8 +124,6 @@ class PostgresStore(DataStore):
                         trajectory_name TEXT,
                         num_trajectories INTEGER,
                         avg_reward REAL,
-                        correct_count INTEGER,
-                        total_count INTEGER,
                         metadata JSONB,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
@@ -259,7 +256,6 @@ class PostgresStore(DataStore):
         step = episode_data.get("step")
         task = json.dumps(episode_data.get("task"))
         is_correct = episode_data.get("is_correct")
-        reward = episode_data.get("reward")
         termination_reason = episode_data.get("termination_reason")
         trajectories = json.dumps(episode_data.get("trajectories", []))
         metrics = json.dumps(episode_data.get("metrics"))
@@ -271,10 +267,10 @@ class PostgresStore(DataStore):
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO episodes (id, session_id, step, task, is_correct, reward, termination_reason, trajectories, metrics, info, search_text)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO episodes (id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, search_text)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (ep_id, session_id, step, task, is_correct, reward, termination_reason, trajectories, metrics, info, search_text),
+                    (ep_id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, search_text),
                 )
                 conn.commit()
 
@@ -395,7 +391,7 @@ class PostgresStore(DataStore):
                     return d
         return None
 
-    def search_episodes(self, query: str, session_id: str | None = None, limit: int = 50, step: int | None = None) -> dict[str, Any]:
+    def search_episodes(self, query: str, session_id: str | None = None, step: int | None = None) -> dict[str, Any]:
         """Search episodes using PostgreSQL full-text search with ranking."""
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
@@ -426,8 +422,7 @@ class PostgresStore(DataStore):
                     sql += " AND step = %s"
                     params.append(step)
 
-                sql += " ORDER BY rank DESC LIMIT %s"
-                params.append(limit)
+                sql += " ORDER BY rank DESC"
 
                 cursor.execute(sql, params)
                 rows = cursor.fetchall()
@@ -445,7 +440,7 @@ class PostgresStore(DataStore):
                 }
 
     def search_trajectory_groups(self, query: str, session_id: str | None = None,
-                                  limit: int = 50, step: int | None = None) -> dict[str, Any]:
+                                  step: int | None = None) -> dict[str, Any]:
         """Search trajectory groups using PostgreSQL full-text search."""
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
@@ -479,8 +474,7 @@ class PostgresStore(DataStore):
                     sql += " AND tg.step = %s"
                     params.append(step)
 
-                sql += " ORDER BY tg.created_at LIMIT %s"
-                params.append(limit)
+                sql += " ORDER BY tg.created_at"
 
                 cursor.execute(sql, params)
                 rows = cursor.fetchall()
@@ -508,8 +502,6 @@ class PostgresStore(DataStore):
 
         num_trajectories = group_data.get("num_trajectories", len(metadata))
         avg_reward = group_data.get("avg_reward")
-        correct_count = group_data.get("correct_count", 0)
-        total_count = group_data.get("total_count", len(metadata))
 
         record_id = str(uuid.uuid4())
         metadata_json = json.dumps(metadata)
@@ -520,8 +512,8 @@ class PostgresStore(DataStore):
                     """
                     INSERT INTO trajectory_groups
                     (id, session_id, step, group_id, task_id, trajectory_name,
-                     num_trajectories, avg_reward, correct_count, total_count, metadata)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     num_trajectories, avg_reward, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         record_id,
@@ -532,8 +524,6 @@ class PostgresStore(DataStore):
                         trajectory_name,
                         num_trajectories,
                         avg_reward,
-                        correct_count,
-                        total_count,
                         metadata_json,
                     ),
                 )

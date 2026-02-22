@@ -50,11 +50,10 @@ def search_trajectory_groups(
     q: str = Query(..., description="Search query"),
     session_id: str | None = Query(None),
     step: int | None = Query(None),
-    limit: int = Query(50, ge=1, le=100),
 ):
     """Search trajectory groups by content."""
     store = request.app.state.store
-    return store.search_trajectory_groups(q, session_id, limit, step)
+    return store.search_trajectory_groups(q, session_id, step=step)
 
 
 @router.get("/trajectory-groups/{group_id}", response_model=TrajectoryGroupResponse)

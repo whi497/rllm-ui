@@ -21,7 +21,6 @@ def test_post_episode_stores_trajectory(client, test_session):
         "episode_id": "task1:0",
         "task": {"question": "What is 2+2?"},
         "is_correct": True,
-        "reward": 1.0,
         "termination_reason": "success",
         "metrics": {"solve_time": 1.5, "num_steps": 1},
         "trajectories": [
@@ -58,7 +57,6 @@ def test_post_episode_stores_trajectory(client, test_session):
     assert data["session_id"] == test_session["id"]
     assert data["step"] == 1
     assert data["is_correct"] is True
-    assert data["reward"] == 1.0
     assert data["termination_reason"] == "success"
     assert data["metrics"] == {"solve_time": 1.5, "num_steps": 1}
     assert data["task"] == {"question": "What is 2+2?"}
@@ -105,7 +103,6 @@ def test_get_episodes_returns_all_for_session(client, test_session):
                 "episode_id": f"task{i}:0",
                 "task": {"question": f"Question {i}"},
                 "is_correct": i % 2 == 0,
-                "reward": float(i),
                 "trajectories": [],
             },
         )
@@ -132,7 +129,6 @@ def test_get_episode_by_id_returns_full_data(client, test_session):
         "episode_id": "detailed-episode",
         "task": {"question": "Complex task"},
         "is_correct": False,
-        "reward": 0.5,
         "trajectories": [
             {
                 "uid": "traj1",
@@ -187,7 +183,6 @@ def test_search_episodes(client, test_session):
             "episode_id": "search-python",
             "task": {"question": "What is Python?"},
             "is_correct": True,
-            "reward": 1.0,
             "trajectories": [
                 {
                     "uid": "t1",
@@ -213,7 +208,6 @@ def test_search_episodes(client, test_session):
             "episode_id": "search-java",
             "task": {"question": "What is Java?"},
             "is_correct": True,
-            "reward": 1.0,
             "trajectories": [
                 {
                     "uid": "t2",

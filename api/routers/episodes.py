@@ -48,7 +48,6 @@ def search_episodes(
     q: str = Query(..., description="Search query"),
     session_id: str | None = Query(None, description="Optional session ID to filter results"),
     step: int | None = Query(None, description="Optional step number to filter results"),
-    limit: int = Query(50, ge=1, le=100, description="Maximum results to return"),
 ):
     """Search episodes by text content.
 
@@ -61,7 +60,7 @@ def search_episodes(
         - matched_terms: Stemmed terms (PostgreSQL) or original query terms (SQLite)
     """
     store = request.app.state.store
-    return store.search_episodes(q, session_id, limit, step)
+    return store.search_episodes(q, session_id, step=step)
 
 
 @router.get("/episodes/{episode_id}", response_model=EpisodeResponse)

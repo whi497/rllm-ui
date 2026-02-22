@@ -125,13 +125,12 @@ class DataStore(ABC):
         pass
 
     @abstractmethod
-    def search_episodes(self, query: str, session_id: str | None = None, limit: int = 50, step: int | None = None) -> dict[str, Any]:
+    def search_episodes(self, query: str, session_id: str | None = None, step: int | None = None) -> dict[str, Any]:
         """Search episodes by text content.
 
         Args:
             query: Search query string
             session_id: Optional session ID to filter results
-            limit: Maximum number of results to return
             step: Optional step number to filter results
 
         Returns:
@@ -143,13 +142,12 @@ class DataStore(ABC):
 
     @abstractmethod
     def search_trajectory_groups(self, query: str, session_id: str | None = None,
-                                  limit: int = 50, step: int | None = None) -> dict[str, Any]:
+                                  step: int | None = None) -> dict[str, Any]:
         """Search trajectory groups by matching group metadata fields and linked episode content.
 
         Args:
             query: Search query string
             session_id: Optional session ID to filter results
-            limit: Maximum number of results to return
             step: Optional step number to filter results
 
         Returns:

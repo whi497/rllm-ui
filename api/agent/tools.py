@@ -44,7 +44,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "get_episodes",
-        "description": "Retrieve episode summaries for a session. Returns task, correctness, reward, termination_reason, and metrics — but NOT full trajectory data (use get_trajectory for that). Can filter by step or correctness.",
+        "description": "Retrieve episode summaries for a session. Returns task, correctness, termination_reason, and metrics — but NOT full trajectory data (use get_trajectory for that). Can filter by step or correctness.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -122,7 +122,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "get_trajectory_groups",
-        "description": "List trajectory groups for a session, optionally filtered by step. Groups show how different rollouts of the same task compare. Returns summaries with correct_count, total_count, avg_reward — useful for finding tasks with 0% solve rate or high variance.",
+        "description": "List trajectory groups for a session, optionally filtered by step. Groups show how different rollouts of the same task compare. Returns summaries with avg_reward — useful for finding tasks with low reward or high variance.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -266,7 +266,6 @@ class ToolExecutor:
                     "id": e["id"],
                     "step": e["step"],
                     "is_correct": e["is_correct"],
-                    "reward": e.get("reward"),
                     "termination_reason": e.get("termination_reason"),
                     "task": e.get("task"),
                     "metrics": e.get("metrics"),
@@ -309,7 +308,6 @@ class ToolExecutor:
             "episode_id": episode["id"],
             "step": episode["step"],
             "is_correct": episode["is_correct"],
-            "reward": episode.get("reward"),
             "termination_reason": episode.get("termination_reason"),
             "task": episode.get("task"),
             "metrics": episode.get("metrics"),
@@ -336,7 +334,6 @@ class ToolExecutor:
                     "session_id": e["session_id"],
                     "step": e["step"],
                     "is_correct": e["is_correct"],
-                    "reward": e.get("reward"),
                     "task": e.get("task"),
                     "rank": e.get("rank"),  # Relevance score if available
                 }
@@ -373,8 +370,6 @@ class ToolExecutor:
                     "step": g.get("step"),
                     "num_trajectories": g.get("num_trajectories"),
                     "avg_reward": g.get("avg_reward"),
-                    "correct_count": g.get("correct_count"),
-                    "total_count": g.get("total_count"),
                 }
             )
 
@@ -426,7 +421,5 @@ class ToolExecutor:
             "step": group.get("step"),
             "num_trajectories": group.get("num_trajectories"),
             "avg_reward": group.get("avg_reward"),
-            "correct_count": group.get("correct_count"),
-            "total_count": group.get("total_count"),
             "rollouts": rollouts,
         }

@@ -87,6 +87,7 @@ class TrajectoryStep(BaseModel):
 class Trajectory(BaseModel):
     uid: str
     name: str | None = None
+    task: dict[str, Any] | None = None
     reward: float | None = None
     info: dict[str, Any] | None = None
     steps: list[TrajectoryStep] = []
@@ -98,7 +99,6 @@ class EpisodeCreate(BaseModel):
     episode_id: str
     task: dict[str, Any]
     is_correct: bool
-    reward: float | None = None
     termination_reason: str | None = None
     trajectories: list[Trajectory]
     metrics: dict[str, Any] | None = None
@@ -111,7 +111,6 @@ class EpisodeResponse(BaseModel):
     step: int
     task: dict[str, Any]
     is_correct: bool
-    reward: float | None
     termination_reason: str | None = None
     trajectories: list[dict[str, Any]]
     metrics: dict[str, Any] | None = None
@@ -146,8 +145,6 @@ class TrajectoryGroupCreate(BaseModel):
     group_id: str  # Format: "task_id:trajectory_name"
     num_trajectories: int = 0
     avg_reward: float | None = None
-    correct_count: int = 0
-    total_count: int = 0
     metadata: list[TrajectoryGroupMetadata]
 
 
@@ -162,8 +159,6 @@ class TrajectoryGroupResponse(BaseModel):
     trajectory_name: str  # Extracted from group_id
     num_trajectories: int
     avg_reward: float | None
-    correct_count: int
-    total_count: int
     metadata: list[TrajectoryGroupMetadata]  # References to episodes + per-trajectory info
     data: dict[str, Any] | None = None  # Full trajectory data (populated on demand from episodes)
     created_at: datetime
