@@ -7,6 +7,10 @@ interface HighlightedTextProps {
     searchTerms?: string[];
     isCurrentMatch?: boolean;
     matchRef?: React.RefObject<HTMLSpanElement>;
+    /** Which occurrence within this text block is current (0-indexed).
+     *  When undefined and isCurrentMatch=true, ALL matches are orange (backward-compatible).
+     *  When defined, only that specific occurrence is orange. */
+    currentMatchOccurrence?: number;
 }
 
 /**
@@ -20,6 +24,7 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({
     searchTerms = [],
     isCurrentMatch = false,
     matchRef,
+    currentMatchOccurrence,
 }) => {
     // Build list of all terms to highlight (original query + stemmed terms)
     const allTerms = new Set<string>();
@@ -42,26 +47,25 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({
     const regex = new RegExp(`(${regexPattern})`, 'gi');
     const parts = text.split(regex);
 
-    let firstMatchFound = false;
-    
+    let matchCount = 0;
+
     return (
         <>
             {parts.map((part, index) => {
                 const isMatch = termsArray.some(term => part.toLowerCase() === term);
                 if (isMatch) {
-                    const isFirstMatch = !firstMatchFound;
-                    firstMatchFound = true;
+                    const thisOccurrence = matchCount;
+                    matchCount++;
+                    // When currentMatchOccurrence is defined, only that occurrence is orange.
+                    // When undefined, all matches are orange if isCurrentMatch (backward-compatible).
+                    const isCurrent = isCurrentMatch && (
+                        currentMatchOccurrence === undefined || thisOccurrence === currentMatchOccurrence
+                    );
                     return (
                         <mark
                             key={index}
-                            ref={isCurrentMatch && isFirstMatch ? matchRef : undefined}
-                            className={`
-                px-0.5 rounded
-                ${isCurrentMatch
-                                    ? 'bg-orange-400 text-white'
-                                    : 'bg-yellow-200 text-inherit'
-                                }
-              `}
+                            ref={isCurrent && (currentMatchOccurrence === undefined ? thisOccurrence === 0 : true) ? matchRef : undefined}
+                            className={`px-0.5 rounded ${isCurrent ? 'bg-orange-400 text-white' : 'bg-yellow-200 text-inherit'}`}
                         >
                             {part}
                         </mark>

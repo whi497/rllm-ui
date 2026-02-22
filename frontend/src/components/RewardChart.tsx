@@ -10,6 +10,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import type { Metric } from "../hooks/useSSE";
+import { EmptyState } from "./ui";
 
 interface ChartDataPoint {
   step: number;
@@ -33,7 +34,7 @@ export const RewardChart: React.FC<MetricChartProps> = ({
   selectedMetric,
   selectedStep,
   onStepClick,
-  color = "#2563eb",
+  color = "#345f94",
 }) => {
   // Transform metrics into chart data points for the selected metric
   const chartData: ChartDataPoint[] = React.useMemo(() => {
@@ -76,16 +77,15 @@ export const RewardChart: React.FC<MetricChartProps> = ({
 
   if (chartData.length === 0 || !hasData || !selectedMetric) {
     return (
-      <div className="flex flex-col items-center justify-center h-full">
-        <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+      <EmptyState
+        icon={
           <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
           </svg>
-        </div>
-        <p className="text-sm font-medium text-gray-900">
-          {!selectedMetric ? "No metric selected" : "No data available"}
-        </p>
-      </div>
+        }
+        title={!selectedMetric ? "No metric selected" : "No data available"}
+        className="h-full"
+      />
     );
   }
 
@@ -192,6 +192,7 @@ export const RewardChart: React.FC<MetricChartProps> = ({
           name={selectedMetric}
           stroke={color}
           strokeWidth={2}
+          isAnimationActive={false}
           dot={chartData.length === 1 ? (props: any) => {
             const { cx, cy, payload } = props;
             if (cx === undefined || cy === undefined) return null;

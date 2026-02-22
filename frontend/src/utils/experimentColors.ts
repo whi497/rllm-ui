@@ -15,7 +15,7 @@ export const PRESET_COLORS = [
   "#2dd4bf", // turquoise
   "#0891b2", // cyan
   "#06b6d4", // sky
-  "#2563eb", // blue
+  "#345f94", // blue
   "#4f46e5", // indigo
   "#6366f1", // blue-violet
   "#7c3aed", // violet

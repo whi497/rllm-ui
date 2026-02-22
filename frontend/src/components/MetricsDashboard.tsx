@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from "react";
 import type { Metric } from "../hooks/useSSE";
 import { RewardChart, getAvailableMetrics } from "./RewardChart";
-import { ChevronRightIcon, ChevronDownIcon, BarChartIcon, MoreVertIcon, SearchIcon } from "./icons";
+import { BarChartIcon, SearchIcon } from "./icons";
+import { EmptyState, ThreeDotMenu, CollapsibleSection } from "./ui";
 
 interface MetricsDashboardProps {
   metrics: Metric[];
@@ -113,89 +114,34 @@ const MetricGroup: React.FC<{
 }> = ({ prefix, metricKeys, totalCount, metrics, searchQuery, isExpanded, onToggle, onStepClick, color }) => {
   const isFiltering = searchQuery.trim().length > 0;
   return (
-    <div className="border-b border-gray-200 last:border-b-0 bg-gray-50">
-      <button
-        onClick={onToggle}
-        className="w-full px-4 py-2.5 bg-gray-50 flex items-center justify-between hover:bg-gray-100 transition-colors text-left"
-      >
-        <div className="flex items-center gap-2">
-          {isExpanded ? (
-            <ChevronDownIcon sx={{ fontSize: 16 }} className="text-gray-400" />
-          ) : (
-            <ChevronRightIcon sx={{ fontSize: 16 }} className="text-gray-400" />
-          )}
-          <h3 className="text-sm font-medium text-gray-900 capitalize">
-            {prefix.replace(/_/g, " ")}
-          </h3>
-        </div>
-        <span className="text-xs text-gray-400">
-          {isFiltering ? (
-            <><span className="text-blue-600 font-medium">{metricKeys.length}</span> / {totalCount}</>
-          ) : (
-            <>{metricKeys.length} metric{metricKeys.length !== 1 ? "s" : ""}</>
-          )}
-        </span>
-      </button>
-      {isExpanded && (
-        <div className="px-4 pb-4 grid grid-cols-3 gap-3">
-          {metricKeys.map((key) => (
-            <DashboardChart
-              key={key}
-              metricKey={key}
-              metrics={metrics}
-              searchQuery={searchQuery}
-              onStepClick={onStepClick}
-              color={color}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-/** Three-dot menu for expand/collapse actions. */
-const ThreeDotMenu: React.FC<{
-  actions: { label: string; onClick: () => void }[];
-}> = ({ actions }) => {
-  const [open, setOpen] = useState(false);
-  const ref = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (!open) return;
-    const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative flex-shrink-0">
-      <button
-        onClick={() => setOpen(!open)}
-        className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-        title="Options"
-      >
-        <MoreVertIcon sx={{ fontSize: 18 }} />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 w-36">
-          {actions.map((action) => (
-            <button
-              key={action.label}
-              onClick={() => {
-                action.onClick();
-                setOpen(false);
-              }}
-              className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <CollapsibleSection
+      isExpanded={isExpanded}
+      onToggle={onToggle}
+      title={
+        <h3 className="text-sm font-medium text-gray-900 capitalize">
+          {prefix.replace(/_/g, " ")}
+        </h3>
+      }
+      rightLabel={
+        isFiltering ? (
+          <><span className="text-accent-600 font-medium">{metricKeys.length}</span> / {totalCount}</>
+        ) : (
+          <>{metricKeys.length} metric{metricKeys.length !== 1 ? "s" : ""}</>
+        )
+      }
+      contentClassName="px-4 pb-4 grid grid-cols-3 gap-3"
+    >
+      {metricKeys.map((key) => (
+        <DashboardChart
+          key={key}
+          metricKey={key}
+          metrics={metrics}
+          searchQuery={searchQuery}
+          onStepClick={onStepClick}
+          color={color}
+        />
+      ))}
+    </CollapsibleSection>
   );
 };
 
@@ -264,14 +210,11 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
 
   if (availableMetrics.length === 0) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center h-full">
-        <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-          <BarChartIcon sx={{ fontSize: 24 }} className="text-gray-400" />
-        </div>
-        <p className="text-sm font-medium text-gray-900">
-          {isConnected ? "Waiting for metrics" : "Connecting"}
-        </p>
-      </div>
+      <EmptyState
+        icon={<BarChartIcon sx={{ fontSize: 24 }} className="text-gray-400" />}
+        title={isConnected ? "Waiting for metrics" : "Connecting"}
+        className="flex-1 h-full"
+      />
     );
   }
 
@@ -324,12 +267,11 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       {/* Scrollable group list */}
       <div className="flex-1 overflow-y-auto">
         {filteredGroupKeys.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32">
-            <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-              <SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />
-            </div>
-            <p className="text-sm font-medium text-gray-900">No matching metrics</p>
-          </div>
+          <EmptyState
+            icon={<SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />}
+            title="No matching metrics"
+            className="h-32"
+          />
         ) : (
           filteredGroupKeys.map((prefix) => (
             <MetricGroup

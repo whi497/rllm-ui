@@ -5,8 +5,17 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { ChevronRightIcon, ChevronDownIcon, SearchIcon, SortIcon } from "./icons";
+import {
+  ChevronRightIcon,
+  ChevronDownIcon,
+  SearchIcon,
+  SortIcon,
+  CheckIcon,
+  CloseIcon,
+} from "./icons";
+import { Spinner, EmptyState, CollapsibleSection, useClickOutside, ThreeDotMenu } from "./ui";
 import { HighlightedText, textContains } from "./HighlightedText";
+import SearchBar from "./SearchBar";
 import { API_BASE_URL } from "../config/api";
 
 interface TrajectoryStep {
@@ -29,6 +38,7 @@ interface TrajectoryStep {
 interface Trajectory {
   uid: string;
   name?: string;
+  task?: Record<string, any>;
   reward: number;
   info?: Record<string, any>;
   steps: TrajectoryStep[];
@@ -40,7 +50,6 @@ interface Episode {
   step: number;
   task: Record<string, any>;
   is_correct: boolean;
-  reward: number | null;
   termination_reason: string | null;
   trajectories: Trajectory[];
   metrics?: Record<string, any>;
@@ -51,6 +60,13 @@ interface Episode {
 interface MatchLocation {
   episodeId: string;
   trajectoryUid: string;
+  stepIndex: number;
+  field: string;
+}
+
+interface GroupMatchLocation {
+  groupId: string;
+  trajectoryIndex: number;
   stepIndex: number;
   field: string;
 }
@@ -83,10 +99,9 @@ interface TrajectoryGroup {
   trajectory_name: string;
   num_trajectories: number;
   avg_reward: number | null;
-  correct_count: number;
-  total_count: number;
-  metadata: TrajectoryGroupMetadata[];  // Now at top level (always present)
-  data: {  // Optional - only populated when full trajectory data is fetched
+  metadata: TrajectoryGroupMetadata[]; // Now at top level (always present)
+  data: {
+    // Optional - only populated when full trajectory data is fetched
     trajectories: Trajectory[];
     metadata: TrajectoryGroupMetadata[];
   } | null;
@@ -98,20 +113,16 @@ type ViewMode = "episodes" | "groups";
 const searchEpisodesAPI = async (
   query: string,
   sessionId: string,
-  limit: number = 50,
-  step?: number | null
+  step?: number | null,
 ): Promise<SearchResponse> => {
   const params = new URLSearchParams({
     q: query,
     session_id: sessionId,
-    limit: String(limit),
   });
   if (step !== null && step !== undefined) {
     params.set("step", String(step));
   }
-  const response = await fetch(
-    `${API_BASE_URL}/api/episodes/search?${params}`
-  );
+  const response = await fetch(`${API_BASE_URL}/api/episodes/search?${params}`);
   if (!response.ok) {
     throw new Error(`Search failed: ${response.status}`);
   }
@@ -120,14 +131,14 @@ const searchEpisodesAPI = async (
 
 const fetchTrajectoryGroupsAPI = async (
   sessionId: string,
-  step?: number | null
+  step?: number | null,
 ): Promise<TrajectoryGroup[]> => {
   const params = new URLSearchParams({ session_id: sessionId });
   if (step !== null && step !== undefined) {
     params.set("step", String(step));
   }
   const response = await fetch(
-    `${API_BASE_URL}/api/trajectory-groups?${params}`
+    `${API_BASE_URL}/api/trajectory-groups?${params}`,
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch trajectory groups: ${response.status}`);
@@ -144,19 +155,17 @@ interface TrajectoryGroupSearchResponse {
 const searchTrajectoryGroupsAPI = async (
   query: string,
   sessionId: string,
-  limit: number = 50,
-  step?: number | null
+  step?: number | null,
 ): Promise<TrajectoryGroupSearchResponse> => {
   const params = new URLSearchParams({
     q: query,
     session_id: sessionId,
-    limit: String(limit),
   });
   if (step !== null && step !== undefined) {
     params.set("step", String(step));
   }
   const response = await fetch(
-    `${API_BASE_URL}/api/trajectory-groups/search?${params}`
+    `${API_BASE_URL}/api/trajectory-groups/search?${params}`,
   );
   if (!response.ok) {
     throw new Error(`Search failed: ${response.status}`);
@@ -167,11 +176,13 @@ const searchTrajectoryGroupsAPI = async (
 // Fetch a single trajectory group with full trajectory data
 const fetchTrajectoryGroupAPI = async (
   groupId: string,
-  includeTrajectories: boolean = true
+  includeTrajectories: boolean = true,
 ): Promise<TrajectoryGroup> => {
-  const params = new URLSearchParams({ include_trajectories: String(includeTrajectories) });
+  const params = new URLSearchParams({
+    include_trajectories: String(includeTrajectories),
+  });
   const response = await fetch(
-    `${API_BASE_URL}/api/trajectory-groups/${groupId}?${params}`
+    `${API_BASE_URL}/api/trajectory-groups/${groupId}?${params}`,
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch trajectory group: ${response.status}`);
@@ -207,7 +218,7 @@ const groupEpisodesByTask = (episodes: Episode[]): EpisodeBatch[] => {
   return Array.from(grouped.entries()).map(([taskId, eps]) => ({
     taskId,
     episodes: eps,
-    correctCount: eps.filter(e => e.is_correct).length,
+    correctCount: eps.filter((e) => e.is_correct).length,
     totalCount: eps.length,
   }));
 };
@@ -222,7 +233,10 @@ interface TaskGroupBatch {
   totalCount: number;
 }
 
-const groupTrajectoryGroupsByTask = (groups: TrajectoryGroup[]): TaskGroupBatch[] => {
+const groupTrajectoryGroupsByTask = (
+  groups: TrajectoryGroup[],
+  taskCounts: Map<string, { correct: number; total: number }>,
+): TaskGroupBatch[] => {
   const grouped = new Map<string, TrajectoryGroup[]>();
 
   for (const group of groups) {
@@ -235,15 +249,21 @@ const groupTrajectoryGroupsByTask = (groups: TrajectoryGroup[]): TaskGroupBatch[
 
   return Array.from(grouped.entries()).map(([taskId, grps]) => {
     const totalTrajs = grps.reduce((sum, g) => sum + g.num_trajectories, 0);
-    const rewards = grps.filter(g => g.avg_reward !== null).map(g => g.avg_reward!);
-    const avgReward = rewards.length > 0 ? rewards.reduce((a, b) => a + b, 0) / rewards.length : null;
+    const rewards = grps
+      .filter((g) => g.avg_reward !== null)
+      .map((g) => g.avg_reward!);
+    const avgReward =
+      rewards.length > 0
+        ? rewards.reduce((a, b) => a + b, 0) / rewards.length
+        : null;
+    const counts = taskCounts.get(taskId);
     return {
       taskId,
       groups: grps,
       totalTrajectories: totalTrajs,
       avgReward,
-      correctCount: grps.reduce((sum, g) => sum + g.correct_count, 0),
-      totalCount: grps.reduce((sum, g) => sum + g.total_count, 0),
+      correctCount: counts?.correct ?? 0,
+      totalCount: counts?.total ?? 0,
     };
   });
 };
@@ -256,10 +276,10 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
   viewMode: externalViewMode,
 }) => {
   const [expandedEpisodes, setExpandedEpisodes] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
   const [expandedTrajectories, setExpandedTrajectories] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [committedQuery, setCommittedQuery] = useState("");
@@ -276,25 +296,37 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
   // Trajectory groups view mode state
   const [internalViewMode] = useState<ViewMode>("episodes");
   const viewMode = externalViewMode ?? internalViewMode;
-  const [trajectoryGroups, setTrajectoryGroups] = useState<TrajectoryGroup[]>([]);
+  const [trajectoryGroups, setTrajectoryGroups] = useState<TrajectoryGroup[]>(
+    [],
+  );
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [groupsError, setGroupsError] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   // Batch grouping state
-  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Sort state (episodes)
-  const [sortMode, setSortMode] = useState<"default" | "solve-rate-desc" | "solve-rate-asc">("default");
+  const [sortMode, setSortMode] = useState<
+    "default" | "solve-rate-desc" | "solve-rate-asc"
+  >("default");
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
   // Group search state
   const [groupSearchQuery, setGroupSearchQuery] = useState("");
   const [groupCommittedQuery, setGroupCommittedQuery] = useState("");
-  const [groupSearchResults, setGroupSearchResults] = useState<TrajectoryGroup[]>([]);
+  const [groupSearchResults, setGroupSearchResults] = useState<
+    TrajectoryGroup[]
+  >([]);
   const [groupSearchLoading, setGroupSearchLoading] = useState(false);
   const [groupSearchError, setGroupSearchError] = useState<string | null>(null);
+  const [groupMatchedTerms, setGroupMatchedTerms] = useState<string[]>([]);
+  const [groupMatchLocations, setGroupMatchLocations] = useState<GroupMatchLocation[]>([]);
+  const [currentGroupMatchIndex, setCurrentGroupMatchIndex] = useState(0);
+  const [preloadedGroupData, setPreloadedGroupData] = useState<Map<string, TrajectoryGroup>>(new Map());
 
   // Group sort state
   const [groupSortMode, setGroupSortMode] = useState("default");
@@ -304,6 +336,10 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
   const currentMatchRef = useRef<HTMLSpanElement>(null);
   const prevDebouncedQuery = useRef("");
   const shouldScrollRef = useRef(false);
+
+  const currentGroupMatchRef = useRef<HTMLSpanElement>(null);
+  const prevGroupDebouncedQuery = useRef("");
+  const shouldGroupScrollRef = useRef(false);
 
   const effectiveSessionId = sessionId || episodes[0]?.session_id;
 
@@ -339,8 +375,7 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
         const response = await searchEpisodesAPI(
           committedQuery,
           effectiveSessionId,
-          50,
-          selectedStep
+          selectedStep,
         );
         const { episodes: results = [], matched_terms: terms = [] } = response;
         setSearchResults(results);
@@ -350,18 +385,19 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
         const expandEpisodes = new Set<string>();
         const expandTrajectories = new Set<string>();
         const expandBatches = new Set<string>();
+        const taskMatchAdded = new Set<string>(); // one task match per batch
 
         results.forEach((episode) => {
           const taskId = getTaskId(episode.id);
           const taskText = getTaskSummary(episode.task);
-          if (textContains(taskText, committedQuery, terms)) {
+          if (textContains(taskText, committedQuery, terms) && !taskMatchAdded.has(taskId)) {
             matches.push({
               episodeId: episode.id,
               trajectoryUid: "",
               stepIndex: -1,
               field: "task",
             });
-            expandEpisodes.add(episode.id);
+            taskMatchAdded.add(taskId);
             expandBatches.add(taskId);
           }
 
@@ -428,10 +464,15 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
       setGroupsLoading(true);
       setGroupsError(null);
       try {
-        const groups = await fetchTrajectoryGroupsAPI(effectiveSessionId, selectedStep);
+        const groups = await fetchTrajectoryGroupsAPI(
+          effectiveSessionId,
+          selectedStep,
+        );
         setTrajectoryGroups(groups);
       } catch (err) {
-        setGroupsError(err instanceof Error ? err.message : "Failed to fetch groups");
+        setGroupsError(
+          err instanceof Error ? err.message : "Failed to fetch groups",
+        );
         setTrajectoryGroups([]);
       } finally {
         setGroupsLoading(false);
@@ -446,6 +487,9 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
     if (!groupCommittedQuery.trim()) {
       setGroupSearchResults([]);
       setGroupSearchError(null);
+      setGroupMatchedTerms([]);
+      setGroupMatchLocations([]);
+      setPreloadedGroupData(new Map());
       return;
     }
 
@@ -462,13 +506,76 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
         const response = await searchTrajectoryGroupsAPI(
           groupCommittedQuery,
           effectiveSessionId,
-          50,
-          selectedStep
+          selectedStep,
         );
-        setGroupSearchResults(response.groups || []);
+        const groups = response.groups || [];
+        const terms = response.matched_terms || [];
+        setGroupSearchResults(groups);
+        setGroupMatchedTerms(terms);
+
+        // Fetch full trajectory data for all matched groups in parallel
+        const fullDataMap = new Map<string, TrajectoryGroup>();
+        const fullGroups = await Promise.all(
+          groups.map((g) =>
+            fetchTrajectoryGroupAPI(g.id, true).catch(() => null),
+          ),
+        );
+        fullGroups.forEach((fullGroup, idx) => {
+          if (fullGroup) {
+            fullDataMap.set(groups[idx].id, fullGroup);
+          }
+        });
+        setPreloadedGroupData(fullDataMap);
+
+        // Scan for field-level matches
+        const matches: GroupMatchLocation[] = [];
+        const expandBatchIds = new Set<string>();
+        const expandGroupIds = new Set<string>();
+
+        for (const group of groups) {
+          const fullGroup = fullDataMap.get(group.id);
+          const trajectories = fullGroup?.data?.trajectories || [];
+
+          expandBatchIds.add(group.task_id);
+          expandGroupIds.add(group.id);
+
+          trajectories.forEach((trajectory, trajIdx) => {
+            trajectory.steps?.forEach((step, stepIdx) => {
+              const visibleFields = getVisibleFields(step);
+              visibleFields.forEach(({ key, value }) => {
+                const fieldText = formatFieldValue(value);
+                if (textContains(fieldText, groupCommittedQuery, terms)) {
+                  matches.push({
+                    groupId: group.id,
+                    trajectoryIndex: trajIdx,
+                    stepIndex: stepIdx,
+                    field: key,
+                  });
+                }
+              });
+            });
+          });
+        }
+
+        setGroupMatchLocations(matches);
+        setExpandedBatches(expandBatchIds);
+        setExpandedGroups(expandGroupIds);
+
+        if (prevGroupDebouncedQuery.current !== groupCommittedQuery) {
+          setCurrentGroupMatchIndex(0);
+          prevGroupDebouncedQuery.current = groupCommittedQuery;
+          if (matches.length > 0) {
+            shouldGroupScrollRef.current = true;
+          }
+        }
       } catch (err) {
-        setGroupSearchError(err instanceof Error ? err.message : "Search failed");
+        setGroupSearchError(
+          err instanceof Error ? err.message : "Search failed",
+        );
         setGroupSearchResults([]);
+        setGroupMatchedTerms([]);
+        setGroupMatchLocations([]);
+        setPreloadedGroupData(new Map());
       } finally {
         setGroupSearchLoading(false);
       }
@@ -478,38 +585,45 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
   }, [groupCommittedQuery, effectiveSessionId, selectedStep]);
 
   useEffect(() => {
-    if (shouldScrollRef.current && currentMatchRef.current) {
-      currentMatchRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
+    if (shouldScrollRef.current && matchLocations.length > 0) {
+      // Defer scroll by one frame to ensure expanded content is rendered in the DOM
+      const rafId = requestAnimationFrame(() => {
+        if (currentMatchRef.current) {
+          currentMatchRef.current.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
+        }
+        shouldScrollRef.current = false;
       });
-      shouldScrollRef.current = false;
+      return () => cancelAnimationFrame(rafId);
     }
   }, [currentMatchIndex, matchLocations]);
 
-  // Click outside to close sort menu
+  // Group match scroll effect — double rAF to ensure deeply nested expanded content is fully rendered
   useEffect(() => {
-    if (!sortMenuOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
-        setSortMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [sortMenuOpen]);
+    if (shouldGroupScrollRef.current && groupMatchLocations.length > 0) {
+      let innerRafId: number;
+      const outerRafId = requestAnimationFrame(() => {
+        innerRafId = requestAnimationFrame(() => {
+          if (currentGroupMatchRef.current) {
+            currentGroupMatchRef.current.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+          }
+          shouldGroupScrollRef.current = false;
+        });
+      });
+      return () => {
+        cancelAnimationFrame(outerRafId);
+        cancelAnimationFrame(innerRafId);
+      };
+    }
+  }, [currentGroupMatchIndex, groupMatchLocations]);
 
-  // Click outside to close group sort menu
-  useEffect(() => {
-    if (!groupSortMenuOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (groupSortMenuRef.current && !groupSortMenuRef.current.contains(e.target as Node)) {
-        setGroupSortMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [groupSortMenuOpen]);
+  useClickOutside(sortMenuRef, () => setSortMenuOpen(false), sortMenuOpen);
+  useClickOutside(groupSortMenuRef, () => setGroupSortMenuOpen(false), groupSortMenuOpen);
 
   const navigateToNextMatch = useCallback(() => {
     if (matchLocations.length === 0) return;
@@ -521,13 +635,17 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
     if (matchLocations.length === 0) return;
     shouldScrollRef.current = true;
     setCurrentMatchIndex(
-      (prev) => (prev - 1 + matchLocations.length) % matchLocations.length
+      (prev) => (prev - 1 + matchLocations.length) % matchLocations.length,
     );
   }, [matchLocations.length]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
-      if (matchLocations.length > 0) {
+      if (searchQuery.trim() && searchQuery !== committedQuery) {
+        // New or changed query — commit it
+        setCommittedQuery(searchQuery);
+      } else if (matchLocations.length > 0) {
+        // Same query — navigate matches
         if (e.shiftKey) {
           navigateToPrevMatch();
         } else {
@@ -588,6 +706,7 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
   };
 
   const currentMatch = matchLocations[currentMatchIndex] || null;
+  const currentGroupMatch = groupMatchLocations[currentGroupMatchIndex] || null;
 
   const displayEpisodes = committedQuery.trim()
     ? filteredEpisodes
@@ -598,7 +717,7 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
     return groupEpisodesByTask(displayEpisodes);
   }, [displayEpisodes]);
 
-  // Sort batches by solve rate
+  // Sort batches by correct rate
   const sortedBatches = useMemo(() => {
     if (sortMode === "default") return episodeBatches;
     return [...episodeBatches].sort((a, b) => {
@@ -613,10 +732,38 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
     return groupCommittedQuery.trim() ? groupSearchResults : trajectoryGroups;
   }, [groupCommittedQuery, groupSearchResults, trajectoryGroups]);
 
+  // Stable task-level episode counts (avoids re-render cascade from SSE episode refetches)
+  const taskEpisodeCounts = useMemo(() => {
+    const counts = new Map<string, { correct: number; total: number }>();
+    for (const ep of filteredEpisodes) {
+      const taskId = getTaskId(ep.id);
+      let entry = counts.get(taskId);
+      if (!entry) {
+        entry = { correct: 0, total: 0 };
+        counts.set(taskId, entry);
+      }
+      entry.total++;
+      if (ep.is_correct) entry.correct++;
+    }
+    return counts;
+  }, [filteredEpisodes]);
+
+  // Map taskId → task summary text (from episodes, for use in group view)
+  const taskTextByTaskId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const ep of filteredEpisodes) {
+      const taskId = getTaskId(ep.id);
+      if (!map.has(taskId) && ep.task) {
+        map.set(taskId, getTaskSummary(ep.task));
+      }
+    }
+    return map;
+  }, [filteredEpisodes]);
+
   // Group trajectory groups by task_id
   const displayGroupBatches = useMemo(() => {
-    return groupTrajectoryGroupsByTask(displayGroups);
-  }, [displayGroups]);
+    return groupTrajectoryGroupsByTask(displayGroups, taskEpisodeCounts);
+  }, [displayGroups, taskEpisodeCounts]);
 
   // Extract unique trajectory names for dynamic sort options
   const uniqueTrajectoryNames = useMemo(() => {
@@ -627,7 +774,7 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
     return Array.from(names).sort();
   }, [displayGroups]);
 
-  // Sort group batches by the selected trajectory name's solve rate
+  // Sort group batches by the selected trajectory name's avg reward
   const sortedGroupBatches = useMemo(() => {
     if (groupSortMode === "default") return displayGroupBatches;
 
@@ -638,173 +785,198 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
     const direction = groupSortMode.slice(lastDash + 1); // "desc" or "asc"
 
     return [...displayGroupBatches].sort((a, b) => {
-      const getRate = (batch: TaskGroupBatch) => {
-        const matching = batch.groups.find(g => g.trajectory_name === trajName);
-        if (!matching || matching.total_count === 0) return 0;
-        return matching.correct_count / matching.total_count;
+      const getReward = (batch: TaskGroupBatch) => {
+        const matching = batch.groups.find(
+          (g) => g.trajectory_name === trajName,
+        );
+        return matching?.avg_reward ?? 0;
       };
-      const rateA = getRate(a);
-      const rateB = getRate(b);
-      return direction === "desc" ? rateB - rateA : rateA - rateB;
+      const rewardA = getReward(a);
+      const rewardB = getReward(b);
+      return direction === "desc" ? rewardB - rewardA : rewardA - rewardB;
     });
   }, [displayGroupBatches, groupSortMode]);
 
+  const episodeSortOptions: SortOption[] = useMemo(() => [
+    { value: "default", label: "Default" },
+    { value: "solve-rate-desc", label: "Correct rate (desc)" },
+    { value: "solve-rate-asc", label: "Correct rate (asc)" },
+  ], []);
+
+  const groupSortOptions: SortOption[] = useMemo(() => [
+    { value: "default", label: "Default" },
+    ...uniqueTrajectoryNames.flatMap((name) => [
+      { value: `${name}-desc`, label: `${name.charAt(0).toUpperCase() + name.slice(1)} avg reward (desc)` },
+      { value: `${name}-asc`, label: `${name.charAt(0).toUpperCase() + name.slice(1)} avg reward (asc)` },
+    ]),
+  ], [uniqueTrajectoryNames]);
+
+  const navigateToNextGroupMatch = useCallback(() => {
+    if (groupMatchLocations.length === 0) return;
+    shouldGroupScrollRef.current = true;
+    setCurrentGroupMatchIndex((prev) => (prev + 1) % groupMatchLocations.length);
+  }, [groupMatchLocations.length]);
+
+  const navigateToPrevGroupMatch = useCallback(() => {
+    if (groupMatchLocations.length === 0) return;
+    shouldGroupScrollRef.current = true;
+    setCurrentGroupMatchIndex(
+      (prev) => (prev - 1 + groupMatchLocations.length) % groupMatchLocations.length,
+    );
+  }, [groupMatchLocations.length]);
+
   const handleGroupKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && groupSearchQuery.trim()) {
-      setGroupCommittedQuery(groupSearchQuery);
+    if (e.key === "Enter") {
+      if (groupSearchQuery.trim() && groupSearchQuery !== groupCommittedQuery) {
+        setGroupCommittedQuery(groupSearchQuery);
+      } else if (groupMatchLocations.length > 0) {
+        if (e.shiftKey) {
+          navigateToPrevGroupMatch();
+        } else {
+          navigateToNextGroupMatch();
+        }
+      } else if (groupSearchQuery.trim()) {
+        setGroupCommittedQuery(groupSearchQuery);
+      }
     }
   };
 
+  // Expand / Collapse all — Episodes (expand batches + episodes, but not trajectories)
+  const expandAllEpisodes = useCallback(() => {
+    setExpandedBatches(new Set(sortedBatches.map((b) => b.taskId)));
+    setExpandedEpisodes(new Set(displayEpisodes.map((e) => e.id)));
+  }, [sortedBatches, displayEpisodes]);
+
+  const collapseAllEpisodes = useCallback(() => {
+    setExpandedBatches(new Set());
+    setExpandedEpisodes(new Set());
+    setExpandedTrajectories(new Set());
+  }, []);
+
+  // Expand / Collapse all — Groups (expand batches + groups, but not trajectories)
+  const expandAllGroups = useCallback(() => {
+    setExpandedBatches(new Set(sortedGroupBatches.map((b) => b.taskId)));
+    setExpandedGroups(new Set(displayGroups.map((g) => g.id)));
+  }, [sortedGroupBatches, displayGroups]);
+
+  const collapseAllGroups = useCallback(() => {
+    setExpandedBatches(new Set());
+    setExpandedGroups(new Set());
+    setExpandedTrajectories(new Set());
+  }, []);
+
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Content - Scrollable */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: "auto" }}>
         {viewMode === "groups" ? (
           // Groups View
-          groupsLoading || groupSearchLoading ? (
+          groupsLoading ? (
             <div className="flex items-center justify-center py-12">
-              <div className="flex flex-col items-center gap-2">
-                <div className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-                <span className="text-sm text-gray-500">
-                  {groupSearchLoading ? "Searching..." : "Loading groups..."}
-                </span>
-              </div>
+              <Spinner size="sm" variant="blue" label="Loading groups..." />
             </div>
-          ) : groupsError || groupSearchError ? (
-            <div className="flex flex-col items-center justify-center py-12 px-4">
-              <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center mb-3">
+          ) : groupsError ? (
+            <EmptyState
+              icon={
                 <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
-              </div>
-              <p className="text-sm font-medium text-gray-900">
-                {groupSearchError ? "Search failed" : "Failed to load groups"}
-              </p>
-              <p className="text-sm text-gray-500 mt-1">{groupSearchError || groupsError}</p>
-            </div>
+              }
+              title="Failed to load groups"
+              description={groupsError}
+              iconSize="sm"
+              iconBg="bg-red-50"
+              className="py-12 px-4"
+            />
           ) : selectedStep === null && !groupCommittedQuery.trim() ? (
-            <div className="flex flex-col items-center justify-center py-12 px-4">
-              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+            <EmptyState
+              icon={
                 <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
                 </svg>
-              </div>
-              <p className="text-sm font-medium text-gray-900">Select a data point</p>
-            </div>
+              }
+              title="Select a data point"
+              className="py-12 px-4"
+            />
           ) : displayGroups.length === 0 && !groupCommittedQuery.trim() ? (
-            <div className="flex flex-col items-center justify-center py-12 px-4">
-              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+            <EmptyState
+              icon={
                 <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                 </svg>
-              </div>
-              <p className="text-sm font-medium text-gray-900">
-                No trajectory groups at step {selectedStep}
-              </p>
-            </div>
-          ) : displayGroups.length === 0 && groupCommittedQuery.trim() ? (
-            <div className="flex flex-col items-center justify-center py-12 px-4">
-              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                <SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />
-              </div>
-              <p className="text-sm font-medium text-gray-900">No matches found</p>
-            </div>
+              }
+              title={`No trajectory groups at step ${selectedStep}`}
+              className="py-12 px-4"
+            />
           ) : (
             <div className="divide-y divide-gray-100">
-              <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center gap-3">
-                <div className="flex items-center flex-shrink-0">
+              <div className="px-4 py-2.5 bg-layer-1 border-b border-gray-200 flex items-center gap-3 sticky top-0 z-10">
+                <div className="flex flex-col flex-shrink-0">
                   <span className="text-sm font-medium text-gray-900">
                     {groupCommittedQuery.trim()
                       ? `${displayGroups.length} result${displayGroups.length !== 1 ? "s" : ""}`
                       : `Step ${selectedStep}`}
                   </span>
                   {!groupCommittedQuery.trim() && (
-                    <span className="text-sm text-gray-500 ml-2">
-                      · {sortedGroupBatches.length} task{sortedGroupBatches.length !== 1 ? "s" : ""} · {displayGroups.length} group{displayGroups.length !== 1 ? "s" : ""}
+                    <span className="text-[11px] leading-tight text-gray-400">
+                      {sortedGroupBatches.length} task
+                      {sortedGroupBatches.length !== 1 ? "s" : ""} · {displayGroups.length} group
+                      {displayGroups.length !== 1 ? "s" : ""}
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                  <div className="flex-1 relative min-w-0">
-                    <input
-                      type="text"
-                      placeholder="Search (Enter)..."
-                      value={groupSearchQuery}
-                      onChange={(e) => setGroupSearchQuery(e.target.value)}
-                      onKeyDown={handleGroupKeyDown}
-                      className="w-full pl-8 pr-8 py-1.5 bg-white border border-gray-200 rounded-md text-sm placeholder-gray-400 focus:outline-none focus:border-gray-400"
-                    />
-                    <SearchIcon
-                      sx={{ fontSize: 16 }}
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
-                    />
-                    {(groupSearchQuery || groupCommittedQuery) && (
-                      <button
-                        onClick={() => {
-                          setGroupSearchQuery("");
-                          setGroupCommittedQuery("");
-                        }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                        title="Clear search"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                  {/* Group sort menu */}
-                  <div ref={groupSortMenuRef} className="relative flex-shrink-0">
-                    <button
-                      onClick={() => setGroupSortMenuOpen((prev) => !prev)}
-                      className={`p-1 rounded transition-colors ${
-                        groupSortMode !== "default"
-                          ? "text-blue-600 bg-blue-50 hover:bg-blue-100"
-                          : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-                      }`}
-                      title="Sort"
-                    >
-                      <SortIcon sx={{ fontSize: 16 }} />
-                    </button>
-                    {groupSortMenuOpen && (
-                      <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 w-44">
-                        <button
-                          onClick={() => { setGroupSortMode("default"); setGroupSortMenuOpen(false); }}
-                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors ${
-                            groupSortMode === "default" ? "text-blue-700 bg-blue-50" : "text-gray-700 hover:bg-gray-50"
-                          }`}
-                        >
-                          Default
-                        </button>
-                        {uniqueTrajectoryNames.length > 0 && (
-                          <div className="border-t border-gray-100 my-1" />
-                        )}
-                        {uniqueTrajectoryNames.map((name) => (
-                          <React.Fragment key={name}>
-                            <button
-                              onClick={() => { setGroupSortMode(`${name}-desc`); setGroupSortMenuOpen(false); }}
-                              className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors ${
-                                groupSortMode === `${name}-desc` ? "text-blue-700 bg-blue-50" : "text-gray-700 hover:bg-gray-50"
-                              }`}
-                            >
-                              {name.charAt(0).toUpperCase() + name.slice(1)} (desc)
-                            </button>
-                            <button
-                              onClick={() => { setGroupSortMode(`${name}-asc`); setGroupSortMenuOpen(false); }}
-                              className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors ${
-                                groupSortMode === `${name}-asc` ? "text-blue-700 bg-blue-50" : "text-gray-700 hover:bg-gray-50"
-                              }`}
-                            >
-                              {name.charAt(0).toUpperCase() + name.slice(1)} (asc)
-                            </button>
-                          </React.Fragment>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <SearchBar
+                  query={groupSearchQuery}
+                  onQueryChange={setGroupSearchQuery}
+                  onKeyDown={handleGroupKeyDown}
+                  onClear={() => { setGroupSearchQuery(""); setGroupCommittedQuery(""); }}
+                  showClear={!!(groupSearchQuery || groupCommittedQuery)}
+                  matchCount={groupMatchLocations.length}
+                  currentMatchIndex={currentGroupMatchIndex}
+                  onNavigateNext={navigateToNextGroupMatch}
+                  onNavigatePrev={navigateToPrevGroupMatch}
+                />
+                <SortMenu
+                  menuRef={groupSortMenuRef}
+                  isOpen={groupSortMenuOpen}
+                  onToggle={() => setGroupSortMenuOpen((prev) => !prev)}
+                  currentMode={groupSortMode}
+                  onSelect={(v) => { setGroupSortMode(v); setGroupSortMenuOpen(false); }}
+                  options={groupSortOptions}
+                />
+                <ThreeDotMenu
+                  actions={[
+                    { label: "Expand all", onClick: expandAllGroups },
+                    { label: "Collapse all", onClick: collapseAllGroups },
+                  ]}
+                />
               </div>
-              {sortedGroupBatches.map((batch) => (
+              {groupSearchLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Spinner size="sm" variant="blue" label="Searching..." />
+                </div>
+              ) : groupSearchError ? (
+                <EmptyState
+                  icon={
+                    <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  }
+                  title="Search failed"
+                  description={groupSearchError}
+                  iconSize="sm"
+                  iconBg="bg-red-50"
+                  className="py-12 px-4"
+                />
+              ) : displayGroups.length === 0 && groupCommittedQuery.trim() ? (
+                <EmptyState
+                  icon={<SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />}
+                  title="No matches found"
+                  className="py-12 px-4"
+                />
+              ) : null}
+
+              {!groupSearchLoading && !groupSearchError && sortedGroupBatches.map((batch) => (
                 <TaskGroupBatchCard
                   key={batch.taskId}
                   batch={batch}
@@ -814,195 +986,133 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
                   onGroupToggle={toggleGroup}
                   expandedTrajectories={expandedTrajectories}
                   onTrajectoryToggle={toggleTrajectory}
+                  searchQuery={groupCommittedQuery}
+                  searchTerms={groupMatchedTerms}
+                  currentGroupMatch={currentGroupMatch}
+                  currentGroupMatchRef={currentGroupMatchRef}
+                  preloadedGroupData={preloadedGroupData}
+                  taskText={taskTextByTaskId.get(batch.taskId)}
                 />
               ))}
             </div>
+          )
+        ) : // Episodes View
+        loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Spinner size="sm" variant="blue" />
+          </div>
+        ) : searchError ? (
+          <EmptyState
+            icon={
+              <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            }
+            title="Search failed"
+            iconBg="bg-red-50"
+            className="py-12 px-4"
+          />
+        ) : displayEpisodes.length === 0 && !committedQuery.trim() ? (
+          selectedStep === null ? (
+            <EmptyState
+              icon={
+                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+                </svg>
+              }
+              title="Select a data point"
+              className="py-12 px-4"
+            />
+          ) : (
+            <EmptyState
+              icon={
+                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              }
+              title={`No episodes at step ${selectedStep}`}
+              className="py-12 px-4"
+            />
           )
         ) : (
-          // Episodes View
-          loading || searchLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="flex flex-col items-center gap-2">
-                <div className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-                {searchLoading && (
-                  <span className="text-sm text-gray-500">Searching...</span>
-                )}
-              </div>
-            </div>
-          ) : searchError ? (
-            <div className="flex flex-col items-center justify-center py-12 px-4">
-              <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mb-3">
-                <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <p className="text-sm font-medium text-gray-900">Search failed</p>
-            </div>
-          ) : displayEpisodes.length === 0 && !committedQuery.trim() ? (
-            selectedStep === null ? (
-              <div className="flex flex-col items-center justify-center py-12 px-4">
-                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                  <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
-                  </svg>
-                </div>
-                <p className="text-sm font-medium text-gray-900">Select a data point</p>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 px-4">
-                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                  <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                </div>
-                <p className="text-sm font-medium text-gray-900">
-                  No episodes at step {selectedStep}
-                </p>
-              </div>
-            )
-          ) : displayEpisodes.length === 0 && committedQuery.trim() ? (
-            <div className="flex flex-col items-center justify-center py-12 px-4">
-              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                <SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />
-              </div>
-              <p className="text-sm font-medium text-gray-900">No matches found</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100">
-              {selectedStep !== null && (
-                <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center gap-3">
-                  <div className="flex items-center flex-shrink-0">
-                    <span className="text-sm font-medium text-gray-900">
-                      {committedQuery.trim()
-                        ? `${displayEpisodes.length} result${displayEpisodes.length !== 1 ? "s" : ""}`
-                        : `Step ${selectedStep}`}
+          <div className="divide-y divide-gray-100">
+            {selectedStep !== null && (
+              <div className="px-4 py-2.5 bg-layer-1 border-b border-gray-200 flex items-center gap-3 sticky top-0 z-10">
+                <div className="flex flex-col flex-shrink-0">
+                  <span className="text-sm font-medium text-gray-900">
+                    {committedQuery.trim()
+                      ? `${displayEpisodes.length} result${displayEpisodes.length !== 1 ? "s" : ""}`
+                      : `Step ${selectedStep}`}
+                  </span>
+                  {!committedQuery.trim() && (
+                    <span className="text-[11px] leading-tight text-gray-400">
+                      {sortedBatches.length} task
+                      {sortedBatches.length !== 1 ? "s" : ""} · {displayEpisodes.length} episode
+                      {displayEpisodes.length !== 1 ? "s" : ""}
                     </span>
-                    {!committedQuery.trim() && (
-                      <span className="text-sm text-gray-500 ml-2">
-                        · {sortedBatches.length} task{sortedBatches.length !== 1 ? "s" : ""} · {displayEpisodes.length} episode{displayEpisodes.length !== 1 ? "s" : ""}
-                      </span>
-                    )}
-                  </div>
-                  {viewMode === "episodes" && (
-                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                      <div className="flex-1 relative min-w-0">
-                        <input
-                          type="text"
-                          placeholder="Search (Enter)..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          onKeyDown={handleKeyDown}
-                          className="w-full pl-8 pr-8 py-1.5 bg-white border border-gray-200 rounded-md text-sm placeholder-gray-400 focus:outline-none focus:border-gray-400"
-                        />
-                        <SearchIcon
-                          sx={{ fontSize: 13 }}
-                          className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"
-                        />
-                        {(searchQuery || committedQuery) && (
-                          <button
-                            onClick={() => {
-                              setSearchQuery("");
-                              setCommittedQuery("");
-                            }}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                            title="Clear search"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
-                      {matchLocations.length > 0 && (
-                        <div className="flex items-center gap-0.5 flex-shrink-0">
-                          <button
-                            onClick={navigateToPrevMatch}
-                            className="p-0.5 hover:bg-gray-100 rounded text-gray-500"
-                            title="Previous match (Shift+Enter)"
-                          >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={navigateToNextMatch}
-                            className="p-0.5 hover:bg-gray-100 rounded text-gray-500"
-                            title="Next match (Enter)"
-                          >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                          <span className="text-xs text-gray-500">
-                            {currentMatchIndex + 1}/{matchLocations.length}
-                          </span>
-                        </div>
-                      )}
-                      {/* Sort menu */}
-                      <div ref={sortMenuRef} className="relative flex-shrink-0">
-                        <button
-                          onClick={() => setSortMenuOpen((prev) => !prev)}
-                          className={`p-1 rounded transition-colors ${
-                            sortMode !== "default"
-                              ? "text-blue-600 bg-blue-50 hover:bg-blue-100"
-                              : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-                          }`}
-                          title="Sort"
-                        >
-                          <SortIcon sx={{ fontSize: 16 }} />
-                        </button>
-                        {sortMenuOpen && (
-                          <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 w-44">
-                            <button
-                              onClick={() => { setSortMode("default"); setSortMenuOpen(false); }}
-                              className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors ${
-                                sortMode === "default" ? "text-blue-700 bg-blue-50" : "text-gray-700 hover:bg-gray-50"
-                              }`}
-                            >
-                              Default
-                            </button>
-                            <button
-                              onClick={() => { setSortMode("solve-rate-desc"); setSortMenuOpen(false); }}
-                              className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors ${
-                                sortMode === "solve-rate-desc" ? "text-blue-700 bg-blue-50" : "text-gray-700 hover:bg-gray-50"
-                              }`}
-                            >
-                              Solve rate (desc)
-                            </button>
-                            <button
-                              onClick={() => { setSortMode("solve-rate-asc"); setSortMenuOpen(false); }}
-                              className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors ${
-                                sortMode === "solve-rate-asc" ? "text-blue-700 bg-blue-50" : "text-gray-700 hover:bg-gray-50"
-                              }`}
-                            >
-                              Solve rate (asc)
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
                   )}
                 </div>
-              )}
+                {viewMode === "episodes" && (
+                  <>
+                    <SearchBar
+                      query={searchQuery}
+                      onQueryChange={setSearchQuery}
+                      onKeyDown={handleKeyDown}
+                      onClear={() => { setSearchQuery(""); setCommittedQuery(""); }}
+                      showClear={!!(searchQuery || committedQuery)}
+                      matchCount={matchLocations.length}
+                      currentMatchIndex={currentMatchIndex}
+                      onNavigateNext={navigateToNextMatch}
+                      onNavigatePrev={navigateToPrevMatch}
+                    />
+                    <SortMenu
+                      menuRef={sortMenuRef}
+                      isOpen={sortMenuOpen}
+                      onToggle={() => setSortMenuOpen((prev) => !prev)}
+                      currentMode={sortMode}
+                      onSelect={(v) => { setSortMode(v as any); setSortMenuOpen(false); }}
+                      options={episodeSortOptions}
+                    />
+                    <ThreeDotMenu
+                      actions={[
+                        { label: "Expand all", onClick: expandAllEpisodes },
+                        { label: "Collapse all", onClick: collapseAllEpisodes },
+                      ]}
+                    />
+                  </>
+                )}
+              </div>
+            )}
 
-              {sortedBatches.map((batch) => (
-                <EpisodeBatchCard
-                  key={batch.taskId}
-                  batch={batch}
-                  isExpanded={expandedBatches.has(batch.taskId)}
-                  onToggle={() => toggleBatch(batch.taskId)}
-                  expandedEpisodes={expandedEpisodes}
-                  onEpisodeToggle={toggleEpisode}
-                  expandedTrajectories={expandedTrajectories}
-                  onTrajectoryToggle={toggleTrajectory}
-                  searchQuery={committedQuery}
-                  searchTerms={matchedTerms}
-                  currentMatch={currentMatch}
-                  currentMatchRef={currentMatchRef}
-                />
-              ))}
-            </div>
-          )
+            {searchLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Spinner size="sm" variant="blue" label="Searching..." />
+              </div>
+            ) : displayEpisodes.length === 0 && committedQuery.trim() ? (
+              <EmptyState
+                icon={<SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />}
+                title="No matches found"
+                className="py-12 px-4"
+              />
+            ) : null}
+
+            {!searchLoading && sortedBatches.map((batch) => (
+              <EpisodeBatchCard
+                key={batch.taskId}
+                batch={batch}
+                isExpanded={expandedBatches.has(batch.taskId)}
+                onToggle={() => toggleBatch(batch.taskId)}
+                expandedEpisodes={expandedEpisodes}
+                onEpisodeToggle={toggleEpisode}
+                expandedTrajectories={expandedTrajectories}
+                onTrajectoryToggle={toggleTrajectory}
+                searchQuery={committedQuery}
+                searchTerms={matchedTerms}
+                currentMatch={currentMatch}
+                currentMatchRef={currentMatchRef}
+              />
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -1011,6 +1121,7 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
 
 interface EpisodeCardProps {
   episode: Episode;
+  rolloutIndex: number;
   isExpanded: boolean;
   onToggle: () => void;
   expandedTrajectories: Set<string>;
@@ -1023,6 +1134,7 @@ interface EpisodeCardProps {
 
 const EpisodeCard: React.FC<EpisodeCardProps> = ({
   episode,
+  rolloutIndex,
   isExpanded,
   onToggle,
   expandedTrajectories,
@@ -1033,14 +1145,12 @@ const EpisodeCard: React.FC<EpisodeCardProps> = ({
   currentMatchRef,
 }) => {
   const trajectories = episode.trajectories || [];
-  const isCurrentMatchInTask =
-    currentMatch?.episodeId === episode.id && currentMatch?.field === "task";
 
   return (
     <div className="border-b border-gray-200 last:border-b-0">
       <button
         onClick={onToggle}
-        className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-gray-100 transition-colors text-left"
+        className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-layer-2 transition-colors text-left"
       >
         <div className="shrink-0">
           {isExpanded ? (
@@ -1053,25 +1163,20 @@ const EpisodeCard: React.FC<EpisodeCardProps> = ({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span
-              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+              className={`inline-flex items-center justify-center w-5 h-5 rounded ${
                 episode.is_correct
                   ? "bg-green-100 text-green-700"
                   : "bg-red-100 text-red-700"
               }`}
             >
-              {episode.is_correct ? "correct" : "incorrect"}
+              {episode.is_correct ? (
+                <CheckIcon sx={{ fontSize: 14 }} />
+              ) : (
+                <CloseIcon sx={{ fontSize: 14 }} />
+              )}
             </span>
-            <span className="text-sm text-gray-500">
-              Step {episode.step}
-            </span>
-            <span className="text-sm text-gray-400">·</span>
-            <span className="text-sm text-gray-500">
-              r={episode.reward?.toFixed(3) ?? "N/A"}
-            </span>
+            <span className="text-sm text-gray-700">Rollout {rolloutIndex}</span>
           </div>
-          <p className="text-xs text-gray-400 mt-1 font-mono">
-            {episode.id}
-          </p>
         </div>
 
         <span className="text-xs text-gray-400 shrink-0">
@@ -1081,21 +1186,6 @@ const EpisodeCard: React.FC<EpisodeCardProps> = ({
 
       {isExpanded && (
         <div className="px-4 pb-4">
-          <div className="mt-2 p-3 bg-white rounded-lg border border-gray-200">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
-              Task
-            </p>
-            <p className="text-sm text-gray-900">
-              <HighlightedText
-                text={getTaskSummary(episode.task)}
-                searchQuery={searchQuery}
-                searchTerms={searchTerms}
-                isCurrentMatch={isCurrentMatchInTask}
-                matchRef={isCurrentMatchInTask ? currentMatchRef : undefined}
-              />
-            </p>
-          </div>
-
           {trajectories.map((trajectory, idx) => {
             const trajUid = trajectory.uid || `${episode.id}-${idx}`;
             return (
@@ -1148,22 +1238,18 @@ const EpisodeBatchCard: React.FC<EpisodeBatchCardProps> = ({
   currentMatch,
   currentMatchRef,
 }) => {
-  const passRate = batch.totalCount > 0
-    ? ((batch.correctCount / batch.totalCount) * 100).toFixed(0)
-    : "N/A";
+  // Task is the same for all episodes in a batch — show it once at batch level
+  const taskText = batch.episodes.length > 0 ? getTaskSummary(batch.episodes[0].task) : "";
+  const isCurrentMatchInTask =
+    currentMatch?.field === "task" &&
+    batch.episodes.some((e) => e.id === currentMatch?.episodeId);
 
   return (
-    <div className="border-b border-gray-200 last:border-b-0 bg-gray-50">
-      <button
-        onClick={onToggle}
-        className="w-full px-4 py-2.5 bg-gray-50 flex items-center justify-between hover:bg-gray-100 transition-colors text-left"
-      >
-        <div className="flex items-center gap-2">
-          {isExpanded ? (
-            <ChevronDownIcon sx={{ fontSize: 16 }} className="text-gray-400" />
-          ) : (
-            <ChevronRightIcon sx={{ fontSize: 16 }} className="text-gray-400" />
-          )}
+    <CollapsibleSection
+      isExpanded={isExpanded}
+      onToggle={onToggle}
+      title={
+        <>
           <span className="text-sm font-medium text-gray-900 font-mono">
             {batch.taskId}
           </span>
@@ -1172,37 +1258,48 @@ const EpisodeBatchCard: React.FC<EpisodeBatchCardProps> = ({
               batch.correctCount === batch.totalCount
                 ? "bg-green-100 text-green-700"
                 : batch.correctCount === 0
-                ? "bg-red-100 text-red-700"
-                : "bg-amber-100 text-amber-700"
+                  ? "bg-red-100 text-red-700"
+                  : "bg-amber-100 text-amber-700"
             }`}
           >
-            {passRate}% pass
+            {batch.correctCount}/{batch.totalCount}
           </span>
-        </div>
-        <span className="text-xs text-gray-400">
-          {batch.totalCount} episode{batch.totalCount !== 1 ? "s" : ""}
-        </span>
-      </button>
-
-      {isExpanded && (
-        <div className="pl-6 border-l-2 border-gray-200 ml-4">
-          {batch.episodes.map((episode) => (
-            <EpisodeCard
-              key={episode.id}
-              episode={episode}
-              isExpanded={expandedEpisodes.has(episode.id)}
-              onToggle={() => onEpisodeToggle(episode.id)}
-              expandedTrajectories={expandedTrajectories}
-              onTrajectoryToggle={onTrajectoryToggle}
+        </>
+      }
+      contentClassName="pl-3 border-l-2 border-gray-200 ml-2"
+    >
+      {taskText && (
+        <div className="mt-2 mx-4 p-3 bg-white rounded-lg border border-gray-200">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+            Task
+          </p>
+          <p className="text-sm text-gray-900">
+            <HighlightedText
+              text={taskText}
               searchQuery={searchQuery}
               searchTerms={searchTerms}
-              currentMatch={currentMatch}
-              currentMatchRef={currentMatchRef}
+              isCurrentMatch={isCurrentMatchInTask}
+              matchRef={isCurrentMatchInTask ? currentMatchRef : undefined}
             />
-          ))}
+          </p>
         </div>
       )}
-    </div>
+      {batch.episodes.map((episode, idx) => (
+        <EpisodeCard
+          key={episode.id}
+          episode={episode}
+          rolloutIndex={idx}
+          isExpanded={expandedEpisodes.has(episode.id)}
+          onToggle={() => onEpisodeToggle(episode.id)}
+          expandedTrajectories={expandedTrajectories}
+          onTrajectoryToggle={onTrajectoryToggle}
+          searchQuery={searchQuery}
+          searchTerms={searchTerms}
+          currentMatch={currentMatch}
+          currentMatchRef={currentMatchRef}
+        />
+      ))}
+    </CollapsibleSection>
   );
 };
 
@@ -1215,6 +1312,12 @@ interface TaskGroupBatchCardProps {
   onGroupToggle: (groupId: string) => void;
   expandedTrajectories: Set<string>;
   onTrajectoryToggle: (uid: string) => void;
+  searchQuery?: string;
+  searchTerms?: string[];
+  currentGroupMatch?: GroupMatchLocation | null;
+  currentGroupMatchRef?: React.RefObject<HTMLSpanElement>;
+  preloadedGroupData?: Map<string, TrajectoryGroup>;
+  taskText?: string;
 }
 
 const TaskGroupBatchCard: React.FC<TaskGroupBatchCardProps> = ({
@@ -1225,48 +1328,54 @@ const TaskGroupBatchCard: React.FC<TaskGroupBatchCardProps> = ({
   onGroupToggle,
   expandedTrajectories,
   onTrajectoryToggle,
+  searchQuery = "",
+  searchTerms = [],
+  currentGroupMatch,
+  currentGroupMatchRef,
+  preloadedGroupData,
+  taskText,
 }) => {
   return (
-    <div className="border-b border-gray-200 last:border-b-0 bg-gray-50">
-      <button
-        onClick={onToggle}
-        className="w-full px-4 py-2.5 bg-gray-50 flex items-center justify-between hover:bg-gray-100 transition-colors text-left"
-      >
-        <div className="flex items-center gap-2">
-          {isExpanded ? (
-            <ChevronDownIcon sx={{ fontSize: 16 }} className="text-gray-400" />
-          ) : (
-            <ChevronRightIcon sx={{ fontSize: 16 }} className="text-gray-400" />
-          )}
+    <CollapsibleSection
+      isExpanded={isExpanded}
+      onToggle={onToggle}
+      title={
+        <>
           <span className="text-sm font-medium text-gray-900 font-mono">
             {batch.taskId}
           </span>
-          {batch.avgReward !== null && (
-            <span className="text-sm text-gray-500">
-              avg r={batch.avgReward.toFixed(3)}
-            </span>
-          )}
-        </div>
-        <span className="text-xs text-gray-400">
-          {batch.groups.length} group{batch.groups.length !== 1 ? "s" : ""} · {batch.totalTrajectories} traj
-        </span>
-      </button>
-
-      {isExpanded && (
-        <div className="pl-6 border-l-2 border-gray-200 ml-4">
-          {batch.groups.map((group) => (
-            <TrajectoryGroupCard
-              key={group.id}
-              group={group}
-              isExpanded={expandedGroups.has(group.id)}
-              onToggle={() => onGroupToggle(group.id)}
-              expandedTrajectories={expandedTrajectories}
-              onTrajectoryToggle={onTrajectoryToggle}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+              batch.correctCount === batch.totalCount
+                ? "bg-green-100 text-green-700"
+                : batch.correctCount === 0
+                  ? "bg-red-100 text-red-700"
+                  : "bg-amber-100 text-amber-700"
+            }`}
+          >
+            {batch.correctCount}/{batch.totalCount}
+          </span>
+        </>
+      }
+      contentClassName="pl-3 border-l-2 border-gray-200 ml-2"
+    >
+      {batch.groups.map((group) => (
+        <TrajectoryGroupCard
+          key={group.id}
+          group={group}
+          isExpanded={expandedGroups.has(group.id)}
+          onToggle={() => onGroupToggle(group.id)}
+          expandedTrajectories={expandedTrajectories}
+          onTrajectoryToggle={onTrajectoryToggle}
+          searchQuery={searchQuery}
+          searchTerms={searchTerms}
+          currentGroupMatch={currentGroupMatch}
+          currentGroupMatchRef={currentGroupMatchRef}
+          preloadedData={preloadedGroupData?.get(group.id)}
+          taskText={taskText}
+        />
+      ))}
+    </CollapsibleSection>
   );
 };
 
@@ -1299,7 +1408,7 @@ const TrajectoryCard: React.FC<TrajectoryCardProps> = ({
     <div className="mt-2 bg-white rounded-lg border border-gray-200 overflow-hidden">
       <button
         onClick={onToggle}
-        className="w-full px-3 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left"
+        className="w-full px-3 py-2 flex items-center gap-2 hover:bg-layer-1 transition-colors text-left"
       >
         {isExpanded ? (
           <ChevronDownIcon sx={{ fontSize: 14 }} className="text-gray-400" />
@@ -1313,7 +1422,7 @@ const TrajectoryCard: React.FC<TrajectoryCardProps> = ({
           {trajectory.steps?.length || 0} steps
         </span>
         <span className="text-sm text-gray-500 ml-auto">
-          r={trajectory.reward?.toFixed(3) ?? "N/A"}
+          reward={trajectory.reward?.toFixed(3) ?? "N/A"}
         </span>
       </button>
 
@@ -1375,39 +1484,38 @@ const StepView: React.FC<StepViewProps> = ({
         </span>
         <div className="flex items-center gap-2 text-xs">
           <span className="text-gray-500">
-            r={step.reward?.toFixed(3) ?? "0"}
+            reward={step.reward?.toFixed(3) ?? "0"}
           </span>
           {step.done && (
-            <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+            <span className="px-1.5 py-0.5 bg-layer-2 text-gray-600 rounded text-xs">
               done
             </span>
           )}
         </div>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {visibleFields.map(({ key, value }) => {
           const fieldConfig = getFieldConfig(key, value);
           const fieldContent = formatFieldValue(value);
           const isCurrent = isCurrentMatch(key);
 
           return (
-            <div key={key}>
-              <p className={`text-xs font-medium ${fieldConfig.labelColor} mb-1`}>
-                {fieldConfig.label}
-              </p>
-              <div
-                className={`${fieldConfig.bgColor} rounded-md border ${fieldConfig.borderColor} p-2 text-sm text-gray-800 whitespace-pre-wrap break-words ${fieldConfig.maxHeight} overflow-y-auto`}
-              >
-                <HighlightedText
-                  text={fieldContent}
-                  searchQuery={searchQuery}
-                  searchTerms={searchTerms}
-                  isCurrentMatch={isCurrent}
-                  matchRef={isCurrent ? currentMatchRef : undefined}
-                />
-              </div>
-            </div>
+            <ExpandableFieldBox
+              key={key}
+              label={fieldConfig.label}
+              labelColor={fieldConfig.labelColor}
+              bgColor={fieldConfig.bgColor}
+              borderColor={fieldConfig.borderColor}
+            >
+              <HighlightedText
+                text={fieldContent}
+                searchQuery={searchQuery}
+                searchTerms={searchTerms}
+                isCurrentMatch={isCurrent}
+                matchRef={isCurrent ? currentMatchRef : undefined}
+              />
+            </ExpandableFieldBox>
           );
         })}
       </div>
@@ -1422,6 +1530,12 @@ interface TrajectoryGroupCardProps {
   onToggle: () => void;
   expandedTrajectories: Set<string>;
   onTrajectoryToggle: (uid: string) => void;
+  searchQuery?: string;
+  searchTerms?: string[];
+  currentGroupMatch?: GroupMatchLocation | null;
+  currentGroupMatchRef?: React.RefObject<HTMLSpanElement>;
+  preloadedData?: TrajectoryGroup;
+  taskText?: string;
 }
 
 const TrajectoryGroupCard: React.FC<TrajectoryGroupCardProps> = ({
@@ -1430,15 +1544,29 @@ const TrajectoryGroupCard: React.FC<TrajectoryGroupCardProps> = ({
   onToggle,
   expandedTrajectories,
   onTrajectoryToggle,
+  searchQuery = "",
+  searchTerms = [],
+  currentGroupMatch,
+  currentGroupMatchRef,
+  preloadedData,
+  taskText,
 }) => {
   // State for fetching full trajectory data on demand
-  const [fullGroupData, setFullGroupData] = useState<TrajectoryGroup | null>(null);
+  const [fullGroupData, setFullGroupData] = useState<TrajectoryGroup | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Fetch full data when expanded (if not already loaded)
+  // Fetch full data when expanded (if not already loaded and no preloaded data)
   useEffect(() => {
-    if (isExpanded && !fullGroupData && !isLoading && !group.data?.trajectories?.length) {
+    if (
+      isExpanded &&
+      !fullGroupData &&
+      !preloadedData &&
+      !isLoading &&
+      !group.data?.trajectories?.length
+    ) {
       setIsLoading(true);
       setLoadError(null);
       fetchTrajectoryGroupAPI(group.id, true)
@@ -1451,22 +1579,28 @@ const TrajectoryGroupCard: React.FC<TrajectoryGroupCardProps> = ({
           setIsLoading(false);
         });
     }
-  }, [isExpanded, fullGroupData, isLoading, group.id, group.data?.trajectories?.length]);
+  }, [
+    isExpanded,
+    fullGroupData,
+    preloadedData,
+    isLoading,
+    group.id,
+    group.data?.trajectories?.length,
+  ]);
 
-  // Use full data if loaded, otherwise fall back to group data
-  const effectiveGroup = fullGroupData || group;
+  // Use preloaded data first, then fetched data, then original group data
+  const effectiveGroup = preloadedData || fullGroupData || group;
   const trajectories = effectiveGroup.data?.trajectories || [];
   // Metadata is now at top level (always present), with fallback to data.metadata for backwards compatibility
-  const metadata = effectiveGroup.metadata || effectiveGroup.data?.metadata || [];
-  const passRate = group.total_count > 0
-    ? ((group.correct_count / group.total_count) * 100).toFixed(0)
-    : "N/A";
-
+  const metadata =
+    effectiveGroup.metadata || effectiveGroup.data?.metadata || [];
+  // True when we've actually loaded or have data — avoids flashing "No trajectories" before the fetch starts
+  const dataLoaded = fullGroupData !== null || preloadedData != null || (group.data?.trajectories?.length ?? 0) > 0;
   return (
     <div className="border-b border-gray-200 last:border-b-0">
       <button
         onClick={onToggle}
-        className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-gray-100 transition-colors text-left"
+        className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-layer-2 transition-colors text-left"
       >
         <div className="shrink-0">
           {isExpanded ? (
@@ -1481,63 +1615,67 @@ const TrajectoryGroupCard: React.FC<TrajectoryGroupCardProps> = ({
             <span className="text-sm font-medium text-gray-900 capitalize">
               {group.trajectory_name || "unnamed"}
             </span>
-            <span
-              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                group.correct_count === group.total_count
-                  ? "bg-green-100 text-green-700"
-                  : group.correct_count === 0
-                  ? "bg-red-100 text-red-700"
-                  : "bg-amber-100 text-amber-700"
-              }`}
-            >
-              {passRate}% pass
-            </span>
-            <span className="text-sm text-gray-500">
-              {group.num_trajectories} traj
-            </span>
+            {group.avg_reward !== null && group.avg_reward === 0 && (
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-red-100 text-red-700">
+                <CloseIcon sx={{ fontSize: 14 }} />
+              </span>
+            )}
             {group.avg_reward !== null && (
-              <>
-                <span className="text-sm text-gray-400">·</span>
-                <span className="text-sm text-gray-500">
-                  avg r={group.avg_reward.toFixed(3)}
-                </span>
-              </>
+              <span className="text-sm text-gray-500">
+                avg reward={group.avg_reward.toFixed(3)}
+              </span>
             )}
           </div>
-          <p className="text-xs text-gray-400 mt-1 font-mono">
-            {group.group_id}
-          </p>
         </div>
       </button>
 
       {isExpanded && (
         <div className="px-4 pb-4">
-          {/* Loading state */}
-          {isLoading && (
-            <p className="text-sm text-gray-500 py-2">Loading trajectories...</p>
-          )}
-          {/* Error state */}
-          {loadError && (
+          {loadError ? (
             <p className="text-sm text-red-500 py-2">Error: {loadError}</p>
-          )}
-          {/* Trajectories */}
-          {!isLoading && trajectories.map((trajectory, idx) => {
-            const trajUid = trajectory.uid || `${group.id}-${idx}`;
-            const meta = metadata[idx];
-            return (
-              <GroupTrajectoryCard
-                key={trajUid}
-                trajectory={trajectory}
-                index={idx}
-                metadata={meta}
-                isExpanded={expandedTrajectories.has(trajUid)}
-                onToggle={() => onTrajectoryToggle(trajUid)}
-              />
-            );
-          })}
-          {/* No trajectories message */}
-          {!isLoading && !loadError && trajectories.length === 0 && (
-            <p className="text-sm text-gray-500 py-2">No trajectories available</p>
+          ) : isLoading || !dataLoaded ? (
+            <Spinner size="sm" variant="blue" label="Loading trajectories..." />
+          ) : trajectories.length === 0 ? (
+            <p className="text-sm text-gray-500 py-2">
+              No trajectories available
+            </p>
+          ) : (
+            <>
+            {taskText && (
+              <div className="mt-2 p-3 bg-white rounded-lg border border-gray-200">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+                  Task
+                </p>
+                <p className="text-sm text-gray-900">
+                  <HighlightedText
+                    text={taskText}
+                    searchQuery={searchQuery}
+                    searchTerms={searchTerms}
+                  />
+                </p>
+              </div>
+            )}
+            {trajectories.map((trajectory, idx) => {
+              const trajUid = trajectory.uid || `${group.id}-${idx}`;
+              const meta = metadata[idx];
+              return (
+                <GroupTrajectoryCard
+                  key={`${group.id}-${idx}`}
+                  trajectory={trajectory}
+                  index={idx}
+                  metadata={meta}
+                  isExpanded={searchQuery ? true : expandedTrajectories.has(trajUid)}
+                  onToggle={() => onTrajectoryToggle(trajUid)}
+                  searchQuery={searchQuery}
+                  searchTerms={searchTerms}
+                  groupId={group.id}
+                  trajectoryIndex={idx}
+                  currentGroupMatch={currentGroupMatch}
+                  currentGroupMatchRef={currentGroupMatchRef}
+                />
+              );
+            })}
+            </>
           )}
         </div>
       )}
@@ -1545,13 +1683,19 @@ const TrajectoryGroupCard: React.FC<TrajectoryGroupCardProps> = ({
   );
 };
 
-// Trajectory card within a group (simplified version without search)
+// Trajectory card within a group
 interface GroupTrajectoryCardProps {
   trajectory: Trajectory;
   index: number;
   metadata?: TrajectoryGroupMetadata;
   isExpanded: boolean;
   onToggle: () => void;
+  searchQuery?: string;
+  searchTerms?: string[];
+  groupId?: string;
+  trajectoryIndex?: number;
+  currentGroupMatch?: GroupMatchLocation | null;
+  currentGroupMatchRef?: React.RefObject<HTMLSpanElement>;
 }
 
 const GroupTrajectoryCard: React.FC<GroupTrajectoryCardProps> = ({
@@ -1560,12 +1704,18 @@ const GroupTrajectoryCard: React.FC<GroupTrajectoryCardProps> = ({
   metadata,
   isExpanded,
   onToggle,
+  searchQuery = "",
+  searchTerms = [],
+  groupId,
+  trajectoryIndex,
+  currentGroupMatch,
+  currentGroupMatchRef,
 }) => {
   return (
     <div className="mt-2 bg-white rounded-lg border border-gray-200 overflow-hidden">
       <button
         onClick={onToggle}
-        className="w-full px-3 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left"
+        className="w-full px-3 py-2 flex items-center gap-2 hover:bg-layer-1 transition-colors text-left"
       >
         {isExpanded ? (
           <ChevronDownIcon sx={{ fontSize: 14 }} className="text-gray-400" />
@@ -1573,25 +1723,35 @@ const GroupTrajectoryCard: React.FC<GroupTrajectoryCardProps> = ({
           <ChevronRightIcon sx={{ fontSize: 14 }} className="text-gray-400" />
         )}
         <span className="text-sm font-medium text-gray-700">
-          Trajectory {index + 1}
+          Trajectory {trajectoryIndex !== undefined ? trajectoryIndex : index}
         </span>
-        {metadata && (
-          <span className="text-xs text-gray-400 font-mono">
-            {metadata.episode_id}
-          </span>
-        )}
         <span className="text-sm text-gray-500">
           {trajectory.steps?.length || 0} steps
         </span>
-        <span className="text-sm text-gray-500 ml-auto">
-          r={trajectory.reward?.toFixed(3) ?? "N/A"}
+        {(trajectory.reward ?? 0) === 0 && (
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-red-100 text-red-700 ml-auto">
+            <CloseIcon sx={{ fontSize: 14 }} />
+          </span>
+        )}
+        <span className={`text-sm text-gray-500 ${(trajectory.reward ?? 0) !== 0 ? "ml-auto" : ""}`}>
+          reward={trajectory.reward?.toFixed(3) ?? "N/A"}
         </span>
       </button>
 
       {isExpanded && trajectory.steps && (
         <div className="border-t border-gray-100">
           {trajectory.steps.map((step, stepIdx) => (
-            <GroupStepView key={stepIdx} step={step} index={stepIdx} />
+            <GroupStepView
+              key={stepIdx}
+              step={step}
+              index={stepIdx}
+              searchQuery={searchQuery}
+              searchTerms={searchTerms}
+              groupId={groupId}
+              trajectoryIndex={trajectoryIndex}
+              currentGroupMatch={currentGroupMatch}
+              currentGroupMatchRef={currentGroupMatchRef}
+            />
           ))}
         </div>
       )}
@@ -1599,14 +1759,35 @@ const GroupTrajectoryCard: React.FC<GroupTrajectoryCardProps> = ({
   );
 };
 
-// Simplified step view for group trajectories (without search highlighting)
+// Step view for group trajectories (with optional search highlighting)
 interface GroupStepViewProps {
   step: TrajectoryStep;
   index: number;
+  searchQuery?: string;
+  searchTerms?: string[];
+  groupId?: string;
+  trajectoryIndex?: number;
+  currentGroupMatch?: GroupMatchLocation | null;
+  currentGroupMatchRef?: React.RefObject<HTMLSpanElement>;
 }
 
-const GroupStepView: React.FC<GroupStepViewProps> = ({ step, index }) => {
+const GroupStepView: React.FC<GroupStepViewProps> = ({
+  step,
+  index,
+  searchQuery = "",
+  searchTerms = [],
+  groupId,
+  trajectoryIndex,
+  currentGroupMatch,
+  currentGroupMatchRef,
+}) => {
   const visibleFields = getVisibleFields(step);
+
+  const isCurrentMatch = (fieldKey: string) =>
+    currentGroupMatch?.groupId === groupId &&
+    currentGroupMatch?.trajectoryIndex === trajectoryIndex &&
+    currentGroupMatch?.stepIndex === index &&
+    currentGroupMatch?.field === fieldKey;
 
   return (
     <div className={`px-3 py-3 ${index > 0 ? "border-t border-gray-100" : ""}`}>
@@ -1616,10 +1797,10 @@ const GroupStepView: React.FC<GroupStepViewProps> = ({ step, index }) => {
         </span>
         <div className="flex items-center gap-2 text-xs">
           <span className="text-gray-500">
-            r={step.reward?.toFixed(3) ?? "0"}
+            reward={step.reward?.toFixed(3) ?? "0"}
           </span>
           {step.done && (
-            <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+            <span className="px-1.5 py-0.5 bg-layer-2 text-gray-600 rounded text-xs">
               done
             </span>
           )}
@@ -1630,20 +1811,105 @@ const GroupStepView: React.FC<GroupStepViewProps> = ({ step, index }) => {
         {visibleFields.map(({ key, value }) => {
           const fieldConfig = getFieldConfig(key, value);
           const fieldContent = formatFieldValue(value);
+          const isCurrent = isCurrentMatch(key);
 
           return (
-            <div key={key}>
-              <p className={`text-xs font-medium ${fieldConfig.labelColor} mb-1`}>
-                {fieldConfig.label}
-              </p>
-              <div
-                className={`${fieldConfig.bgColor} rounded-md border ${fieldConfig.borderColor} p-2 text-sm text-gray-800 whitespace-pre-wrap break-words ${fieldConfig.maxHeight} overflow-y-auto`}
-              >
-                {fieldContent}
-              </div>
-            </div>
+            <ExpandableFieldBox
+              key={key}
+              label={fieldConfig.label}
+              labelColor={fieldConfig.labelColor}
+              bgColor={fieldConfig.bgColor}
+              borderColor={fieldConfig.borderColor}
+            >
+              <HighlightedText
+                text={fieldContent}
+                searchQuery={searchQuery}
+                searchTerms={searchTerms}
+                isCurrentMatch={isCurrent}
+                matchRef={isCurrent ? currentGroupMatchRef : undefined}
+              />
+            </ExpandableFieldBox>
           );
         })}
+      </div>
+    </div>
+  );
+};
+
+// Shared sort menu component
+interface SortOption {
+  value: string;
+  label: string;
+}
+
+const SortMenu: React.FC<{
+  menuRef: React.RefObject<HTMLDivElement>;
+  isOpen: boolean;
+  onToggle: () => void;
+  currentMode: string;
+  onSelect: (value: string) => void;
+  options: SortOption[];
+}> = ({ menuRef, isOpen, onToggle, currentMode, onSelect, options }) => (
+  <div ref={menuRef} className="relative flex-shrink-0">
+    <button
+      onClick={onToggle}
+      className={`p-1 rounded transition-colors ${
+        currentMode !== "default"
+          ? "text-accent-600 bg-accent-50 hover:bg-accent-100"
+          : "text-gray-400 hover:text-gray-600 hover:bg-layer-2"
+      }`}
+      title="Sort"
+    >
+      <SortIcon sx={{ fontSize: 16 }} />
+    </button>
+    {isOpen && (
+      <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 w-52">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => onSelect(opt.value)}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors ${
+              currentMode === opt.value
+                ? "text-accent-700 bg-accent-50"
+                : "text-gray-700 hover:bg-layer-1"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
+// Expandable field box component
+const ExpandableFieldBox: React.FC<{
+  label: string;
+  labelColor: string;
+  bgColor: string;
+  borderColor: string;
+  children: React.ReactNode;
+}> = ({ label, labelColor, bgColor, borderColor, children }) => {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  const DEFAULT_HEIGHT = 192;
+
+  useEffect(() => {
+    if (contentRef.current) {
+      const scrollH = contentRef.current.scrollHeight;
+      setHeight(Math.min(scrollH, DEFAULT_HEIGHT));
+    }
+  }, [children]);
+
+  return (
+    <div>
+      <p className={`text-xs font-medium ${labelColor} mb-1`}>{label}</p>
+      <div
+        ref={contentRef}
+        className={`${bgColor} rounded-md border ${borderColor} p-2 text-sm text-gray-800 whitespace-pre-wrap break-words overflow-auto`}
+        style={{ resize: 'vertical', height: height ?? 'auto', minHeight: '2rem', maxHeight: '60vh' }}
+      >
+        {children}
       </div>
     </div>
   );
@@ -1659,8 +1925,16 @@ const HIDDEN_FIELDS = new Set([
   "done",
 ]);
 
+function isEmptyValue(value: any): boolean {
+  if (value == null) return true;
+  if (typeof value === "string" && value.trim() === "") return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  if (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0) return true;
+  return false;
+}
+
 function getVisibleFields(
-  step: TrajectoryStep
+  step: TrajectoryStep,
 ): Array<{ key: string; value: any }> {
   const fields: Array<{ key: string; value: any }> = [];
 
@@ -1674,16 +1948,16 @@ function getVisibleFields(
   ];
 
   fieldOrder.forEach((key) => {
-    if (step[key] != null && !HIDDEN_FIELDS.has(key)) {
+    if (!HIDDEN_FIELDS.has(key) && !isEmptyValue(step[key])) {
       fields.push({ key, value: step[key] });
     }
   });
 
   Object.keys(step).forEach((key) => {
     if (
-      step[key] != null &&
       !HIDDEN_FIELDS.has(key) &&
-      !fieldOrder.includes(key)
+      !fieldOrder.includes(key) &&
+      !isEmptyValue(step[key])
     ) {
       fields.push({ key, value: step[key] });
     }
@@ -1694,66 +1968,35 @@ function getVisibleFields(
 
 function getFieldConfig(
   key: string,
-  _value: any
+  _value: any,
 ): {
   label: string;
   labelColor: string;
   bgColor: string;
   borderColor: string;
-  maxHeight: string;
 } {
+  const style = {
+    labelColor: "text-gray-600",
+    bgColor: "bg-layer-1",
+    borderColor: "border-gray-200",
+  };
   const configs: Record<string, any> = {
-    observation: {
-      label: "Observation",
-      labelColor: "text-blue-600",
-      bgColor: "bg-blue-50",
-      borderColor: "border-blue-100",
-      maxHeight: "max-h-32",
-    },
-    thought: {
-      label: "Thought",
-      labelColor: "text-amber-600",
-      bgColor: "bg-amber-50",
-      borderColor: "border-amber-100",
-      maxHeight: "max-h-32",
-    },
-    model_response: {
-      label: "Response",
-      labelColor: "text-purple-600",
-      bgColor: "bg-purple-50",
-      borderColor: "border-purple-100",
-      maxHeight: "max-h-48",
-    },
-    action: {
-      label: "Action",
-      labelColor: "text-green-600",
-      bgColor: "bg-green-50",
-      borderColor: "border-green-100",
-      maxHeight: "max-h-32",
-    },
-    chat_completions: {
-      label: "Chat Completions",
-      labelColor: "text-indigo-600",
-      bgColor: "bg-indigo-50",
-      borderColor: "border-indigo-100",
-      maxHeight: "max-h-48",
-    },
-    info: {
-      label: "Info",
-      labelColor: "text-gray-600",
-      bgColor: "bg-gray-50",
-      borderColor: "border-gray-200",
-      maxHeight: "max-h-32",
-    },
+    observation: { label: "Observation", ...style },
+    thought: { label: "Thought", ...style },
+    model_response: { label: "Response", ...style },
+    action: { label: "Action", ...style },
+    chat_completions: { label: "Chat Completions", ...style },
+    info: { label: "Info", ...style },
   };
 
-  return configs[key] || {
-    label: formatFieldLabel(key),
-    labelColor: "text-gray-600",
-    bgColor: "bg-gray-50",
-    borderColor: "border-gray-200",
-    maxHeight: "max-h-32",
-  };
+  return (
+    configs[key] || {
+      label: formatFieldLabel(key),
+      labelColor: "text-gray-600",
+      bgColor: "bg-layer-1",
+      borderColor: "border-gray-200",
+    }
+  );
 }
 
 function formatFieldLabel(key: string): string {

@@ -10,7 +10,7 @@ interface MetricSelectorModalProps {
 
 // Color palette for metrics
 const METRIC_COLORS = [
-  "#2563eb", // blue
+  "#345f94", // blue
   "#dc2626", // red
   "#16a34a", // green
   "#9333ea", // purple
@@ -116,19 +116,19 @@ export const MetricSelectorModal: React.FC<MetricSelectorModalProps> = ({
                         onClick={() => handleSelectMetric(metric)}
                         className={`w-full flex items-center gap-2 py-1.5 px-2 rounded text-left transition-colors ${
                           isSelected
-                            ? "bg-blue-50 text-blue-700"
-                            : "hover:bg-gray-50 text-gray-700"
+                            ? "bg-accent-50 text-accent-700"
+                            : "hover:bg-layer-1 text-gray-700"
                         }`}
                       >
                         <div
                           className={`w-3 h-3 rounded-full border-2 flex items-center justify-center shrink-0 ${
                             isSelected
-                              ? "border-blue-600"
+                              ? "border-accent-600"
                               : "border-gray-300"
                           }`}
                         >
                           {isSelected && (
-                            <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-accent-600" />
                           )}
                         </div>
                         <span className="text-sm font-mono truncate">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useMetricsSSE, useLogsSSE } from "../hooks/useSSE";
 import { RewardChart, getAvailableMetrics } from "./RewardChart";
@@ -11,16 +11,16 @@ import { MetricSelectorModal } from "./MetricSelectorModal";
 import { MetricsDashboard } from "./MetricsDashboard";
 import {
   WarningIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   ArrowBackIcon,
   SearchIcon,
 } from "./icons";
-import { HighlightedText } from "./HighlightedText";
 import { ActionMenu } from "./ActionMenu";
+import { ConfigRenderer } from "./ConfigRenderer";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { getExperimentColor } from "../utils/experimentColors";
+import { useExperimentVisibility } from "../contexts/ExperimentVisibilityContext";
 import { API_BASE_URL } from "../config/api";
+import { Spinner, EmptyState } from "./ui";
 
 type SessionStatus = "running" | "completed" | "failed" | "crashed";
 
@@ -47,10 +47,10 @@ interface Session {
 const StatusBadge: React.FC<{ status: SessionStatus }> = ({ status }) => {
   const config = {
     running: { label: "Running", bg: "bg-green-100", text: "text-green-700", dot: "bg-green-500", pulse: true },
-    completed: { label: "Completed", bg: "bg-gray-100", text: "text-gray-600", dot: "bg-gray-400", pulse: false },
+    completed: { label: "Completed", bg: "bg-layer-2", text: "text-gray-600", dot: "bg-gray-400", pulse: false },
     failed: { label: "Failed", bg: "bg-red-100", text: "text-red-700", dot: "bg-red-500", pulse: false },
     crashed: { label: "Crashed", bg: "bg-orange-100", text: "text-orange-700", dot: "bg-orange-500", pulse: false },
-  }[status] ?? { label: status, bg: "bg-gray-100", text: "text-gray-600", dot: "bg-gray-400", pulse: false };
+  }[status] ?? { label: status, bg: "bg-layer-2", text: "text-gray-600", dot: "bg-gray-400", pulse: false };
 
   return (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${config.bg} ${config.text}`}>
@@ -94,17 +94,10 @@ interface TrajectoryStep {
   model_response?: any;
 }
 
-const formatConfigValue = (value: any): string => {
-  if (value === null || value === undefined) return "N/A";
-  if (typeof value === "boolean") return value ? "True" : "False";
-  if (Array.isArray(value)) return value.join(", ");
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-};
-
 export const TrainingRunDetail: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const { colorOverrides, updateColor } = useExperimentVisibility();
 
   const [session, setSession] = useState<Session | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -117,50 +110,14 @@ export const TrainingRunDetail: React.FC = () => {
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
   const [openMetricDropdown, setOpenMetricDropdown] = useState<number | null>(null);
   const [episodeViewMode, setEpisodeViewMode] = useState<"episodes" | "groups">("episodes");
-  const [expandedMetaSections, setExpandedMetaSections] = useState<Set<string>>(new Set());
   const [metaSearchQuery, setMetaSearchQuery] = useState("");
-
-  // Filtered config based on search query
-  const filteredConfig = useMemo(() => {
-    const query = metaSearchQuery.trim().toLowerCase();
-    if (!query || !session?.config) return null; // null = no filter, show all
-
-    const result: Record<string, Record<string, any>> = {};
-    for (const [sectionKey, sectionValue] of Object.entries(session.config)) {
-      if (typeof sectionValue !== "object" || sectionValue === null) continue;
-
-      // If section name matches, include entire section
-      if (sectionKey.toLowerCase().includes(query)) {
-        result[sectionKey] = sectionValue;
-        continue;
-      }
-
-      // Otherwise filter individual entries
-      const matchedEntries: Record<string, any> = {};
-      for (const [key, value] of Object.entries(sectionValue)) {
-        if (
-          key.toLowerCase().includes(query) ||
-          formatConfigValue(value).toLowerCase().includes(query)
-        ) {
-          matchedEntries[key] = value;
-        }
-      }
-      if (Object.keys(matchedEntries).length > 0) {
-        result[sectionKey] = matchedEntries;
-      }
-    }
-    return result;
-  }, [metaSearchQuery, session?.config]);
-
-  // Sections to auto-expand when search is active
-  const searchExpandedSections = useMemo(() => {
-    if (!filteredConfig) return new Set<string>();
-    return new Set(Object.keys(filteredConfig));
-  }, [filteredConfig]);
 
   // Chart expanded groups (lifted from MetricsDashboard to persist across tab switches)
   const [chartExpandedGroups, setChartExpandedGroups] = useState<Set<string>>(new Set());
   const [chartHasAutoExpanded, setChartHasAutoExpanded] = useState(false);
+
+  // Code tab expanded sections (lifted from WorkflowDiagram to persist across tab switches)
+  const [codeExpandedSections, setCodeExpandedSections] = useState<Set<string>>(new Set());
 
   // Rename/delete state
   const [isRenaming, setIsRenaming] = useState(false);
@@ -340,15 +297,8 @@ export const TrainingRunDetail: React.FC = () => {
   };
 
   const handleColorChange = (color: string) => {
-    if (!sessionId || !session) return;
-    // Optimistic update — show new color immediately
-    setSession({ ...session, color });
-    // Fire PATCH in background
-    fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ color }),
-    }).catch(() => { /* ignore */ });
+    if (!sessionId) return;
+    updateColor(sessionId, color);
   };
 
   const handleChartsChartClick = (step: number, metric: string) => {
@@ -359,18 +309,15 @@ export const TrainingRunDetail: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-gray-50">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-6 h-6 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-          <p className="text-sm text-gray-500">Loading...</p>
-        </div>
+      <div className="flex-1 flex items-center justify-center bg-layer-1">
+        <Spinner size="md" variant="blue" label="Loading..." />
       </div>
     );
   }
 
   if (error || !session) {
     return (
-      <div className="flex-1 p-6 bg-gray-50">
+      <div className="flex-1 p-6 bg-layer-1">
         <div className="max-w-2xl mx-auto">
           <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
             <div className="flex items-start gap-3">
@@ -393,8 +340,9 @@ export const TrainingRunDetail: React.FC = () => {
   const latestMetrics =
     metrics.length > 0 ? metrics[metrics.length - 1]?.data : null;
   const currentEpoch = latestMetrics?.["progress/epoch"] || 0;
-  const totalEpochs = session?.config?.trainer?.total_epochs || 0;
-  const experimentColor = sessionId ? (session?.color || getExperimentColor(sessionId)) : undefined;
+  const totalEpochs = session?.config?.rllm?.trainer?.total_epochs
+    ?? session?.config?.trainer?.total_epochs ?? 0;
+  const experimentColor = sessionId ? (colorOverrides[sessionId] || session?.color || getExperimentColor(sessionId)) : undefined;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-white">
@@ -406,7 +354,7 @@ export const TrainingRunDetail: React.FC = () => {
               onClick={() =>
                 navigate(`/project/${session.project_id}`)
               }
-              className="p-1 hover:bg-gray-100 text-gray-400 hover:text-gray-700 rounded-md transition-colors"
+              className="p-1 hover:bg-layer-2 text-gray-400 hover:text-gray-700 rounded-md transition-colors"
               title="Back to project overview"
             >
               <ArrowBackIcon sx={{ fontSize: 20 }} />
@@ -467,7 +415,7 @@ export const TrainingRunDetail: React.FC = () => {
                   transition-colors duration-150 border-b-2 -mb-px
                   ${
                     activeTab === tab.id
-                      ? "border-blue-500 text-blue-600"
+                      ? "border-accent-500 text-accent-600"
                       : "border-transparent text-gray-500 hover:text-gray-900"
                   }
                 `}
@@ -523,7 +471,7 @@ export const TrainingRunDetail: React.FC = () => {
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }} className="p-2 space-y-2">
                 {selectedMetrics.map((metric, index) => (
-                  <div key={index} className="bg-gray-50 rounded-lg border border-gray-200 flex flex-col">
+                  <div key={index} className="bg-layer-1 rounded-lg border border-gray-200 flex flex-col">
                     {/* Chart Header */}
                     <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between gap-2">
                       <div
@@ -532,7 +480,7 @@ export const TrainingRunDetail: React.FC = () => {
                         onMouseLeave={() => setOpenMetricDropdown(null)}
                       >
                         <button
-                          className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-gray-700 bg-white hover:bg-gray-100 rounded border border-gray-200 transition-colors"
+                          className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-gray-700 bg-white hover:bg-layer-2 rounded border border-gray-200 transition-colors"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -598,10 +546,10 @@ export const TrainingRunDetail: React.FC = () => {
               style={{
                 width: '4px',
                 cursor: 'col-resize',
-                backgroundColor: isDragging === 'left' ? '#3b82f6' : 'transparent',
+                backgroundColor: isDragging === 'left' ? '#3f72af' : 'transparent',
                 transition: 'background-color 0.15s',
               }}
-              className="hover:bg-blue-500 flex-shrink-0"
+              className="hover:bg-accent-500 flex-shrink-0"
             />
 
             {/* Middle Panel - Episodes */}
@@ -618,28 +566,25 @@ export const TrainingRunDetail: React.FC = () => {
             >
               <div className="px-4 h-14 border-b border-gray-200 flex items-center justify-between" style={{ flexShrink: 0 }}>
                 <span className="text-sm font-medium text-gray-900">Episodes</span>
-                <div className="inline-flex rounded-lg bg-gray-100 p-0.5">
+                <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                  <span className={`text-xs ${episodeViewMode === "groups" ? "text-gray-900" : "text-gray-500"}`}>
+                    Trajectory Groups
+                  </span>
                   <button
-                    onClick={() => setEpisodeViewMode("episodes")}
-                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                      episodeViewMode === "episodes"
-                        ? "bg-white text-gray-900 shadow-sm"
-                        : "text-gray-600 hover:text-gray-900"
+                    role="switch"
+                    aria-checked={episodeViewMode === "groups"}
+                    onClick={() => setEpisodeViewMode(episodeViewMode === "groups" ? "episodes" : "groups")}
+                    className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${
+                      episodeViewMode === "groups" ? "bg-accent-500" : "bg-gray-300"
                     }`}
                   >
-                    Episodes
+                    <span
+                      className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                        episodeViewMode === "groups" ? "translate-x-3.5" : "translate-x-0.5"
+                      }`}
+                    />
                   </button>
-                  <button
-                    onClick={() => setEpisodeViewMode("groups")}
-                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                      episodeViewMode === "groups"
-                        ? "bg-white text-gray-900 shadow-sm"
-                        : "text-gray-600 hover:text-gray-900"
-                    }`}
-                  >
-                    Groups
-                  </button>
-                </div>
+                </label>
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
                 <EpisodePanel
@@ -658,10 +603,10 @@ export const TrainingRunDetail: React.FC = () => {
               style={{
                 width: '4px',
                 cursor: 'col-resize',
-                backgroundColor: isDragging === 'right' ? '#3b82f6' : 'transparent',
+                backgroundColor: isDragging === 'right' ? '#3f72af' : 'transparent',
                 transition: 'background-color 0.15s',
               }}
-              className="hover:bg-blue-500 flex-shrink-0"
+              className="hover:bg-accent-500 flex-shrink-0"
             />
 
             {/* Right Panel - Agent */}
@@ -717,109 +662,28 @@ export const TrainingRunDetail: React.FC = () => {
                 </div>
                 {/* Config sections */}
                 <div className="flex-1 overflow-auto">
-                  {(() => {
-                    const isSearchActive = filteredConfig !== null;
-                    const configToRender = isSearchActive ? filteredConfig : session.config;
-                    const sections = Object.entries(configToRender!).filter(
-                      ([, v]) => typeof v === "object" && v !== null
-                    );
-
-                    if (isSearchActive && sections.length === 0) {
-                      return (
-                        <div className="flex flex-col items-center justify-center py-12 px-4">
-                          <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                            <SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />
-                          </div>
-                          <p className="text-sm font-medium text-gray-900">No matching fields</p>
-                        </div>
-                      );
-                    }
-
-                    return sections.map(([sectionKey, sectionValue]) => {
-                      const isOpen = isSearchActive
-                        ? searchExpandedSections.has(sectionKey)
-                        : expandedMetaSections.has(sectionKey);
-                      const toggleSection = () => {
-                        if (isSearchActive) return; // disable toggle during search
-                        setExpandedMetaSections((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(sectionKey)) {
-                            next.delete(sectionKey);
-                          } else {
-                            next.add(sectionKey);
-                          }
-                          return next;
-                        });
-                      };
-
-                      const entryCount = Object.keys(sectionValue).length;
-
-                      return (
-                        <div key={sectionKey} className="border-b border-gray-200 last:border-b-0 bg-gray-50">
-                          <button
-                            onClick={toggleSection}
-                            className={`w-full px-4 py-2.5 bg-gray-50 flex items-center justify-between hover:bg-gray-100 transition-colors text-left ${isSearchActive ? "cursor-default" : ""}`}
-                          >
-                            <div className="flex items-center gap-2">
-                              {isOpen ? (
-                                <ChevronDownIcon sx={{ fontSize: 16 }} className="text-gray-400" />
-                              ) : (
-                                <ChevronRightIcon sx={{ fontSize: 16 }} className="text-gray-400" />
-                              )}
-                              <h3 className="text-sm font-medium text-gray-900 capitalize">
-                                <HighlightedText
-                                  text={sectionKey.replace(/_/g, " ")}
-                                  searchQuery={metaSearchQuery.trim()}
-                                />
-                              </h3>
-                            </div>
-                            <span className="text-xs text-gray-400">
-                              {entryCount} field{entryCount !== 1 ? "s" : ""}
-                            </span>
-                          </button>
-                          {isOpen && (
-                            <dl className="bg-white">
-                              {Object.entries(sectionValue).map(([key, value]) => (
-                                <div
-                                  key={key}
-                                  className="px-4 py-2 flex justify-between items-start gap-4"
-                                >
-                                  <dt className="text-sm text-gray-500">
-                                    <HighlightedText
-                                      text={key}
-                                      searchQuery={metaSearchQuery.trim()}
-                                    />
-                                  </dt>
-                                  <dd className="text-sm text-gray-900 text-right font-mono">
-                                    <HighlightedText
-                                      text={formatConfigValue(value)}
-                                      searchQuery={metaSearchQuery.trim()}
-                                    />
-                                  </dd>
-                                </div>
-                              ))}
-                            </dl>
-                          )}
-                        </div>
-                      );
-                    });
-                  })()}
+                  <ConfigRenderer data={session.config} searchQuery={metaSearchQuery.trim()} />
                 </div>
               </>
             ) : (
-              <div className="flex flex-col items-center justify-center h-full">
-                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+              <EmptyState
+                icon={
                   <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                   </svg>
-                </div>
-                <p className="text-sm font-medium text-gray-900">No configuration data</p>
-              </div>
+                }
+                title="No configuration data"
+                className="h-full"
+              />
             )}
           </div>
         ) : activeTab === "workflow" ? (
           <div style={{ height: '100%' }}>
-            <WorkflowDiagram session={session} />
+            <WorkflowDiagram
+              session={session}
+              expandedSections={codeExpandedSections}
+              onExpandedSectionsChange={setCodeExpandedSections}
+            />
           </div>
         ) : null}
       </div>

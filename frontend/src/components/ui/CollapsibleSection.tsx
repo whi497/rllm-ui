@@ -1,0 +1,44 @@
+import React from "react";
+import { ChevronRightIcon, ChevronDownIcon } from "../icons";
+
+interface CollapsibleSectionProps {
+  isExpanded: boolean;
+  onToggle: () => void;
+  title: React.ReactNode;
+  rightLabel?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+  contentClassName?: string;
+  disabled?: boolean;
+}
+
+export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
+  isExpanded,
+  onToggle,
+  title,
+  rightLabel,
+  children,
+  className = "border-b border-gray-200 last:border-b-0 bg-layer-1",
+  contentClassName,
+  disabled = false,
+}) => (
+  <div className={className}>
+    <button
+      onClick={onToggle}
+      className={`w-full px-4 py-2.5 bg-layer-1 flex items-center justify-between hover:bg-layer-2 transition-colors text-left ${disabled ? "cursor-default" : ""}`}
+    >
+      <div className="flex items-center gap-2">
+        {isExpanded ? (
+          <ChevronDownIcon sx={{ fontSize: 16 }} className="text-gray-400" />
+        ) : (
+          <ChevronRightIcon sx={{ fontSize: 16 }} className="text-gray-400" />
+        )}
+        {title}
+      </div>
+      {rightLabel && <span className="text-xs text-gray-400">{rightLabel}</span>}
+    </button>
+    {isExpanded && (
+      <div className={contentClassName}>{children}</div>
+    )}
+  </div>
+);

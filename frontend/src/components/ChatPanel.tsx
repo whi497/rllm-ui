@@ -209,7 +209,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
       <div style={{ flex: 1, overflowY: 'auto' }} className="p-4 space-y-3">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12">
-            <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+            <div className="w-12 h-12 bg-layer-2 rounded-full flex items-center justify-center mb-3">
               <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
@@ -226,8 +226,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
             <div
               className={`max-w-[85%] px-3 py-2 rounded-lg ${
                 msg.role === "user"
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-100 text-gray-900"
+                  ? "bg-accent-600 text-white"
+                  : "bg-layer-2 text-gray-900"
               }`}
             >
               {msg.role === "user" ? (
@@ -298,10 +298,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
         {/* Tool indicator */}
         {currentTool && (
           <div className="flex justify-start">
-            <div className="bg-blue-50 border border-blue-200 px-3 py-2 rounded-lg">
+            <div className="bg-accent-50 border border-accent-200 px-3 py-2 rounded-lg">
               <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
-                <span className="text-sm text-blue-700">
+                <div className="w-1.5 h-1.5 bg-accent-500 rounded-full animate-pulse" />
+                <span className="text-sm text-accent-700">
                   Calling {currentTool}...
                 </span>
               </div>
@@ -330,13 +330,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
             onKeyDown={handleKeyDown}
             placeholder="Ask about your training run..."
             rows={1}
-            className="flex-1 resize-none border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+            className="flex-1 resize-none border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent transition-shadow"
             disabled={isLoading}
           />
           <button
             type="submit"
             disabled={isLoading || !input.trim()}
-            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-2 bg-accent-600 text-white text-sm font-medium rounded-lg hover:bg-accent-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             Send
           </button>

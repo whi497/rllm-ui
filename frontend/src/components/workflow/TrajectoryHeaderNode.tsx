@@ -12,7 +12,7 @@ interface TrajectoryHeaderNodeProps {
 
 export const TrajectoryHeaderNode = ({ data }: TrajectoryHeaderNodeProps) => {
   return (
-    <div className="px-4 py-2 bg-gray-100 border border-gray-300 rounded-lg min-w-[180px]">
+    <div className="px-4 py-2 bg-layer-2 border border-gray-300 rounded-lg min-w-[180px]">
       <Handle type="target" position={Position.Top} className="!bg-gray-400" />
 
       <div className="text-sm font-semibold text-black mb-1">

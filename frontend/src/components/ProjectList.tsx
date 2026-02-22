@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SearchIcon, WarningIcon, BarChartIcon } from './icons';
+import { Spinner, EmptyState } from './ui';
 import { ActionMenu } from './ActionMenu';
 import { ConfirmDialog } from './ConfirmDialog';
 import { API_BASE_URL } from '../config/api';
@@ -18,12 +19,6 @@ interface Session {
   completed_at: string | null;
 }
 
-const statusConfig: Record<SessionStatus, { label: string; classes: string }> = {
-  running: { label: "Running", classes: "bg-green-100 text-green-700" },
-  completed: { label: "Completed", classes: "bg-gray-100 text-gray-600" },
-  failed: { label: "Failed", classes: "bg-red-100 text-red-700" },
-  crashed: { label: "Crashed", classes: "bg-orange-100 text-orange-700" },
-};
 
 interface ProjectData {
   id: string;
@@ -31,7 +26,7 @@ interface ProjectData {
   sessions: Session[];
 }
 
-export const TrainingRunsList: React.FC = () => {
+export const ProjectList: React.FC = () => {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +87,9 @@ export const TrainingRunsList: React.FC = () => {
       if ('name' in model && typeof model.name === 'string') return model.name;
       return 'Custom Model';
     }
+    // verl-style configs: actor_rollout_ref.model.path
+    const actorModel = session.config?.actor_rollout_ref?.model?.path;
+    if (typeof actorModel === 'string') return actorModel;
     return 'N/A';
   };
 
@@ -165,10 +163,7 @@ export const TrainingRunsList: React.FC = () => {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-8 h-8 border-4 border-gray-200 border-t-black rounded-full animate-spin" />
-          <p className="text-sm text-gray-500">Loading training runs...</p>
-        </div>
+        <Spinner size="lg" variant="black" label="Loading training runs..." />
       </div>
     );
   }
@@ -177,7 +172,7 @@ export const TrainingRunsList: React.FC = () => {
     return (
       <div className="flex-1 p-8">
         <div className="max-w-2xl mx-auto">
-          <div className="bg-gray-50 border border-gray-300 rounded-xl p-6 mb-4">
+          <div className="bg-layer-1 border border-gray-300 rounded-xl p-6 mb-4">
             <div className="flex items-start gap-3">
               <WarningIcon sx={{ fontSize: 28 }} className="text-black" />
               <div className="flex-1">
@@ -204,7 +199,7 @@ export const TrainingRunsList: React.FC = () => {
       <div className="w-full">
         {/* Header */}
         <div className="mb-4">
-          <h1 className="text-lg font-semibold text-black mb-2">Projects</h1>
+          <h1 className="text-xl font-semibold text-black mb-2">Projects</h1>
         </div>
 
         {/* Search */}
@@ -218,14 +213,14 @@ export const TrainingRunsList: React.FC = () => {
               placeholder="Search projects and runs..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400 transition-all duration-200"
+              className="w-full pl-10 pr-4 py-2.5 text-base border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400 transition-all duration-200"
             />
           </div>
         </div>
 
         {/* Summary */}
         <div className="mb-4">
-          <p className="text-sm text-gray-600">
+          <p className="text-base text-gray-600">
             <span className="font-medium text-black">{filteredProjects.length}</span> project{filteredProjects.length !== 1 ? 's' : ''}{' '}
             &middot; <span className="font-medium text-black">{totalRuns}</span> run{totalRuns !== 1 ? 's' : ''}
           </p>
@@ -234,16 +229,11 @@ export const TrainingRunsList: React.FC = () => {
         {/* Empty state */}
         {filteredProjects.length === 0 ? (
           <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
-            <div className="flex flex-col items-center gap-4">
-              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
-                <BarChartIcon sx={{ fontSize: 32 }} className="text-gray-400" />
-              </div>
-              <div>
-                <h3 className="text-sm font-medium text-black">
-                  {searchQuery ? 'No matching training runs' : 'No training runs yet'}
-                </h3>
-              </div>
-            </div>
+            <EmptyState
+              icon={<BarChartIcon sx={{ fontSize: 32 }} className="text-gray-400" />}
+              title={searchQuery ? 'No matching training runs' : 'No training runs yet'}
+              iconSize="lg"
+            />
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -271,10 +261,10 @@ export const TrainingRunsList: React.FC = () => {
                         }}
                         onBlur={() => handleRenameProject(project.id)}
                         onClick={(e) => e.stopPropagation()}
-                        className="text-sm font-semibold text-black mb-1 truncate flex-1 min-w-0 border border-gray-300 rounded px-1.5 py-0.5 outline-none ring-0 focus:border-gray-300 focus:ring-0 focus:outline-none"
+                        className="text-base font-semibold text-black mb-1 truncate flex-1 min-w-0 border border-gray-300 rounded px-1.5 py-0.5 outline-none ring-0 focus:border-gray-300 focus:ring-0 focus:outline-none"
                       />
                     ) : (
-                      <div className="text-sm font-semibold text-black mb-1 truncate group-hover:text-blue-700 flex-1 min-w-0">
+                      <div className="text-base font-semibold text-black mb-1 truncate group-hover:text-accent-700 flex-1 min-w-0">
                         {project.project}
                       </div>
                     )}
@@ -288,7 +278,7 @@ export const TrainingRunsList: React.FC = () => {
                       />
                     </div>
                   </div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-sm text-gray-500">
                     {project.sessions.length} run{project.sessions.length !== 1 ? 's' : ''}
                     {latestSession && (
                       <span className="text-gray-400"> &middot; {getLastRequestTime(latestSession)}</span>

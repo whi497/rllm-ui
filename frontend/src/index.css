@@ -5,15 +5,15 @@
 @tailwind utilities;
 
 :root {
-  --color-bg: #f9fafb;
+  --color-bg: #fafbfc;
   --color-surface: #ffffff;
   --color-border: #e5e7eb;
-  --color-border-light: #f3f4f6;
+  --color-border-light: #f1f3f5;
   --color-text: #111827;
   --color-text-secondary: #6b7280;
   --color-text-tertiary: #9ca3af;
-  --color-accent: #3b82f6;
-  --color-accent-hover: #2563eb;
+  --color-accent: #3f72af;
+  --color-accent-hover: #345f94;
 }
 
 * {
@@ -80,6 +80,13 @@ pre, code {
 /* Input base styles */
 input, textarea, select {
   font-family: inherit;
+}
+
+/* Override Prism theme font to match our codebase */
+code[class*="language-"],
+pre[class*="language-"] {
+  font-family: 'IBM Plex Mono', 'SF Mono', Monaco, monospace !important;
+  background: none !important;
 }
 
 /* Remove focus outline from chart elements */

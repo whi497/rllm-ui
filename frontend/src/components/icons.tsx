@@ -52,4 +52,7 @@ export {
   PushPin as PushPinIcon,
   // Sort icon for episode sorting
   Sort as SortIcon,
+  // Check and X icons (no circle)
+  Check as CheckIcon,
+  Close as CloseIcon,
 } from "@mui/icons-material";

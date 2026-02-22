@@ -27,12 +27,13 @@ export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<Error | null>(null);
     const seenIds = useRef(new Set<number>());
+    const eventSourceRef = useRef<EventSource | null>(null);
 
     useEffect(() => {
         if (!enabled || !sessionId) return;
 
         const apiUrl = API_BASE_URL;
-        let eventSource: EventSource | null = null;
+        let aborted = false;
 
         // Reset state
         seenIds.current = new Set();
@@ -44,34 +45,39 @@ export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
                 // Fetch historical metrics
                 console.log('[Metrics] Fetching initial metrics...');
                 const response = await fetch(`${apiUrl}/api/sessions/${sessionId}/metrics`);
+                if (aborted) return;
                 if (response.ok) {
                     const data: Metric[] = await response.json();
                     console.log('[Metrics] Fetched initial metrics:', data.length);
-                    
+
                     // Track seen IDs
                     data.forEach(m => seenIds.current.add(m.id));
                     setMetrics(data);
                 }
             } catch (e) {
+                if (aborted) return;
                 console.error('[Metrics] Failed to fetch initial metrics:', e);
             }
 
+            if (aborted) return;
+
             // Then connect to SSE stream for live updates
-            eventSource = new EventSource(
+            const es = new EventSource(
                 `${apiUrl}/api/sessions/${sessionId}/metrics/stream`
             );
+            eventSourceRef.current = es;
 
-            eventSource.onopen = () => {
+            es.onopen = () => {
                 setIsConnected(true);
                 setError(null);
                 console.log('[SSE] Connected to metrics stream');
             };
 
-            eventSource.onmessage = (event) => {
+            es.onmessage = (event) => {
                 try {
                     const metric: Metric = JSON.parse(event.data);
                     console.log('[SSE] Received metric:', metric);
-                    
+
                     // Avoid duplicates
                     if (!seenIds.current.has(metric.id)) {
                         seenIds.current.add(metric.id);
@@ -82,21 +88,23 @@ export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
                 }
             };
 
-            eventSource.onerror = (e) => {
+            es.onerror = (e) => {
                 console.error('[SSE] Connection error:', e);
                 setIsConnected(false);
                 setError(new Error('SSE connection failed'));
-                eventSource?.close();
+                es.close();
             };
         };
 
         initialize();
 
         return () => {
-            if (eventSource) {
-                eventSource.close();
-                setIsConnected(false);
+            aborted = true;
+            if (eventSourceRef.current) {
+                eventSourceRef.current.close();
+                eventSourceRef.current = null;
             }
+            setIsConnected(false);
         };
     }, [sessionId, enabled]);
 
@@ -109,12 +117,13 @@ export function useLogsSSE({ sessionId, enabled = true }: UseSSEOptions) {
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<Error | null>(null);
     const seenIds = useRef(new Set<number>());
+    const eventSourceRef = useRef<EventSource | null>(null);
 
     useEffect(() => {
         if (!enabled || !sessionId) return;
 
         const apiUrl = API_BASE_URL;
-        let eventSource: EventSource | null = null;
+        let aborted = false;
 
         seenIds.current = new Set();
         setLogs([]);
@@ -123,27 +132,32 @@ export function useLogsSSE({ sessionId, enabled = true }: UseSSEOptions) {
         const initialize = async () => {
             try {
                 const response = await fetch(`${apiUrl}/api/sessions/${sessionId}/logs?limit=5000`);
+                if (aborted) return;
                 if (response.ok) {
                     const data: LogEntry[] = await response.json();
                     data.forEach(l => seenIds.current.add(l.id));
                     setLogs(data);
                 }
             } catch (e) {
+                if (aborted) return;
                 console.error('[Logs] Failed to fetch initial logs:', e);
             } finally {
-                setIsLoading(false);
+                if (!aborted) setIsLoading(false);
             }
 
-            eventSource = new EventSource(
+            if (aborted) return;
+
+            const es = new EventSource(
                 `${apiUrl}/api/sessions/${sessionId}/logs/stream`
             );
+            eventSourceRef.current = es;
 
-            eventSource.onopen = () => {
+            es.onopen = () => {
                 setIsConnected(true);
                 setError(null);
             };
 
-            eventSource.onmessage = (event) => {
+            es.onmessage = (event) => {
                 try {
                     const log: LogEntry = JSON.parse(event.data);
                     if (!seenIds.current.has(log.id)) {
@@ -159,20 +173,22 @@ export function useLogsSSE({ sessionId, enabled = true }: UseSSEOptions) {
                 }
             };
 
-            eventSource.onerror = () => {
+            es.onerror = () => {
                 setIsConnected(false);
                 setError(new Error('SSE connection failed'));
-                eventSource?.close();
+                es.close();
             };
         };
 
         initialize();
 
         return () => {
-            if (eventSource) {
-                eventSource.close();
-                setIsConnected(false);
+            aborted = true;
+            if (eventSourceRef.current) {
+                eventSourceRef.current.close();
+                eventSourceRef.current = null;
             }
+            setIsConnected(false);
         };
     }, [sessionId, enabled]);
 

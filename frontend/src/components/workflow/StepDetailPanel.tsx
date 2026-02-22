@@ -10,7 +10,7 @@ export const StepDetailPanel: React.FC<StepDetailPanelProps> = ({ step, onClose 
   const renderValue = (value: any): React.ReactNode => {
     if (value === null || value === undefined) return <span className="text-gray-500">N/A</span>;
     if (typeof value === 'object') {
-      return <pre className="text-xs bg-gray-50 p-2 rounded overflow-x-auto">{JSON.stringify(value, null, 2)}</pre>;
+      return <pre className="text-xs bg-layer-1 p-2 rounded overflow-x-auto">{JSON.stringify(value, null, 2)}</pre>;
     }
     return <span className="text-sm text-black">{String(value)}</span>;
   };

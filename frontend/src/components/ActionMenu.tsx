@@ -64,7 +64,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
           e.preventDefault();
           setOpen(!open);
         }}
-        className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+        className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-layer-2 transition-colors"
         title="Actions"
       >
         <MoreVertIcon sx={{ fontSize: 18 }} />
@@ -85,7 +85,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
                 setOpen(false);
                 onPin();
               }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-layer-1 transition-colors"
             >
               <PushPinIcon sx={{ fontSize: 16 }} />
               {isPinned ? "Unpin" : "Pin"}
@@ -98,7 +98,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
               setOpen(false);
               onRename();
             }}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-layer-1 transition-colors"
           >
             <EditIcon sx={{ fontSize: 16 }} />
             Rename
@@ -110,7 +110,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
               onMouseLeave={() => setShowColors(false)}
             >
               <button
-                className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors ${showColors ? "text-blue-700 bg-blue-50" : "text-gray-700 hover:bg-gray-50"}`}
+                className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors ${showColors ? "text-accent-700 bg-accent-50" : "text-gray-700 hover:bg-layer-1"}`}
               >
                 <PaletteIcon sx={{ fontSize: 16 }} />
                 Change color

@@ -14,6 +14,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { getExperimentColor } from "../utils/experimentColors";
 import { useExperimentVisibility } from "../contexts/ExperimentVisibilityContext";
 import { API_BASE_URL } from "../config/api";
+import { useClickOutside } from "./ui";
 
 interface Session {
   id: string;
@@ -175,7 +176,7 @@ export const Sidebar: React.FC = () => {
           )}
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
-            className="p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-md transition-colors"
+            className="p-1.5 hover:bg-layer-2 text-gray-400 hover:text-gray-600 rounded-md transition-colors"
             title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {isCollapsed ? (
@@ -196,8 +197,8 @@ export const Sidebar: React.FC = () => {
               ${isCollapsed ? "justify-center" : ""}
               ${
                 isProjectsActive
-                  ? "bg-blue-50 text-blue-700"
-                  : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                  ? "bg-accent-50 text-accent-700"
+                  : "text-gray-600 hover:bg-layer-1 hover:text-gray-900"
               }
             `}
             title={isCollapsed ? "Projects" : undefined}
@@ -224,7 +225,7 @@ export const Sidebar: React.FC = () => {
           {/* Drag handle */}
           <div
             onMouseDown={handleDragStart}
-            className="w-1 hover:bg-blue-400 cursor-col-resize flex-shrink-0 transition-colors"
+            className="w-1 hover:bg-accent-400 cursor-col-resize flex-shrink-0 transition-colors"
             style={{ marginLeft: "-2px", marginRight: "-2px", zIndex: 10 }}
           />
         </>
@@ -241,7 +242,7 @@ const ExperimentsPanel: React.FC<{
   onRefresh: () => void;
 }> = ({ project, onExperimentClick, onRefresh }) => {
   const navigate = useNavigate();
-  const { hiddenExperiments, toggleExperiment, resetVisibility, hideAll, pinnedExperiments, togglePin } = useExperimentVisibility();
+  const { hiddenExperiments, toggleExperiment, resetVisibility, hideAll, pinnedExperiments, togglePin, colorOverrides, updateColor } = useExperimentVisibility();
 
   // Project rename state
   const [isRenamingProject, setIsRenamingProject] = useState(false);
@@ -251,9 +252,6 @@ const ExperimentsPanel: React.FC<{
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [sessionRenameValue, setSessionRenameValue] = useState("");
 
-  // Optimistic color overrides (sessionId -> color)
-  const [colorOverrides, setColorOverrides] = useState<Record<string, string>>({});
-
   // Search
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -261,16 +259,7 @@ const ExperimentsPanel: React.FC<{
   const [eyeMenuOpen, setEyeMenuOpen] = useState(false);
   const eyeMenuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!eyeMenuOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (eyeMenuRef.current && !eyeMenuRef.current.contains(e.target as Node)) {
-        setEyeMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [eyeMenuOpen]);
+  useClickOutside(eyeMenuRef, () => setEyeMenuOpen(false), eyeMenuOpen);
 
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<{
@@ -345,14 +334,7 @@ const ExperimentsPanel: React.FC<{
   };
 
   const handleColorChange = (sessionId: string, color: string) => {
-    // Optimistic update — show new color immediately
-    setColorOverrides((prev) => ({ ...prev, [sessionId]: color }));
-    // Fire PATCH in background
-    fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ color }),
-    }).then(() => onRefresh()).catch(() => { /* ignore */ });
+    updateColor(sessionId, color);
   };
 
   return (
@@ -393,7 +375,7 @@ const ExperimentsPanel: React.FC<{
         <div ref={eyeMenuRef} className="relative flex-shrink-0">
           <button
             onClick={() => setEyeMenuOpen(!eyeMenuOpen)}
-            className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-layer-2 transition-colors"
             title="Visibility options"
           >
             <VisibilityIcon sx={{ fontSize: 16 }} />
@@ -405,7 +387,7 @@ const ExperimentsPanel: React.FC<{
                   resetVisibility();
                   setEyeMenuOpen(false);
                 }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-layer-1 transition-colors"
               >
                 <VisibilityIcon sx={{ fontSize: 16 }} />
                 Show all
@@ -415,7 +397,7 @@ const ExperimentsPanel: React.FC<{
                   hideAll(project.sessions.map((s) => s.id));
                   setEyeMenuOpen(false);
                 }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-layer-1 transition-colors"
               >
                 <VisibilityOffIcon sx={{ fontSize: 16 }} />
                 Hide all
@@ -464,7 +446,7 @@ const ExperimentsPanel: React.FC<{
           return (
             <div
               key={session.id}
-              className="flex items-center gap-1.5 rounded-md transition-colors mb-0.5 px-2 py-2 hover:bg-gray-100 group"
+              className="flex items-center gap-1.5 rounded-md transition-colors mb-0.5 px-2 py-2 hover:bg-layer-2 group"
             >
               {/* Eye toggle / Pin icon */}
               <button
@@ -502,7 +484,7 @@ const ExperimentsPanel: React.FC<{
               ) : (
                 <button
                   onClick={() => onExperimentClick(session.id)}
-                  className="text-sm font-medium text-gray-800 hover:text-blue-700 truncate text-left flex-1 min-w-0"
+                  className="text-sm font-medium text-gray-800 hover:text-accent-700 truncate text-left flex-1 min-w-0"
                 >
                   {session.experiment}
                 </button>

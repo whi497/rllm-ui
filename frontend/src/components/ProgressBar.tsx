@@ -16,7 +16,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
       <span className="text-xs text-gray-500 text-right">Epoch {currentEpoch + 1}/{totalEpochs}</span>
       <div className="w-28 h-1.5 bg-gray-200 rounded-full overflow-hidden">
         <div
-          className="h-full bg-blue-500 rounded-full transition-all duration-300"
+          className="h-full bg-accent-500 rounded-full transition-all duration-300"
           style={{ width: `${epochPct}%` }}
         />
       </div>
