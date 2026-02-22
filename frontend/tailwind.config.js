@@ -5,6 +5,28 @@ export default {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
+      typography: {
+        DEFAULT: {
+          css: {
+            'code::before': { content: 'none' },
+            'code::after': { content: 'none' },
+            code: {
+              color: 'inherit',
+              fontWeight: '400',
+            },
+            pre: {
+              backgroundColor: '#111827',
+              color: '#f3f4f6',
+            },
+            'pre code': {
+              color: 'inherit',
+              fontSize: 'inherit',
+              fontWeight: 'inherit',
+              fontFamily: 'inherit',
+            },
+          },
+        },
+      },
       fontFamily: {
         sans: [
           "DM Sans",

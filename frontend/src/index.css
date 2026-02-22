@@ -86,6 +86,17 @@ input, textarea, select {
 code[class*="language-"],
 pre[class*="language-"] {
   font-family: 'IBM Plex Mono', 'SF Mono', Monaco, monospace !important;
+}
+
+/* Neutralize Prism theme inside prose containers (ChatPanel markdown).
+   Prism sets color:black + text-shadow:0 1px white on language-* elements,
+   which clashes with prose's dark code blocks. These overrides let the
+   typography plugin control code styling. Prism still works in WorkflowDiagram
+   since it doesn't use .prose. */
+.prose code[class*="language-"],
+.prose pre[class*="language-"] {
+  color: inherit !important;
+  text-shadow: none !important;
   background: none !important;
 }
 
