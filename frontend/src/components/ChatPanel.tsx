@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { API_BASE_URL } from "../config/api";
 
@@ -12,6 +12,14 @@ interface ChatPanelProps {
 }
 
 const CHAT_STORAGE_KEY = "rllm_chat_messages_";
+const MODEL_STORAGE_KEY = "rllm_chat_model";
+const MAX_TEXTAREA_HEIGHT = 200;
+
+const MODEL_OPTIONS = [
+  { label: "Haiku 4.5", value: "claude-haiku-4-5-20251001" },
+  { label: "Sonnet 4.6", value: "claude-sonnet-4-6" },
+  { label: "Opus 4.6", value: "claude-opus-4-6" },
+] as const;
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -19,10 +27,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [currentTool, setCurrentTool] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState(
+    () => localStorage.getItem(MODEL_STORAGE_KEY) || MODEL_OPTIONS[1].value
+  );
+  const [showModelMenu, setShowModelMenu] = useState(false);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const userScrolledUpRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
+  const programmaticScrollRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const wasUsingToolRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!sessionId) {
@@ -41,8 +58,42 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
     }
   }, [sessionId]);
 
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    // Ignore scroll events caused by our own programmatic scrollTo
+    if (programmaticScrollRef.current) return;
+
+    const scrollTop = el.scrollTop;
+    const scrolledUp = scrollTop < lastScrollTopRef.current;
+    lastScrollTopRef.current = scrollTop;
+
+    if (scrolledUp) {
+      // User scrolled up — disengage auto-scroll
+      userScrolledUpRef.current = true;
+    }
+
+    // Re-engage if user scrolls back to near bottom
+    const distFromBottom = el.scrollHeight - scrollTop - el.clientHeight;
+    if (distFromBottom < 40) {
+      userScrolledUpRef.current = false;
+    }
+  };
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!userScrolledUpRef.current) {
+      const el = scrollContainerRef.current;
+      if (el) {
+        programmaticScrollRef.current = true;
+        el.scrollTop = el.scrollHeight;
+        // Clear the flag after the scroll event fires
+        requestAnimationFrame(() => {
+          programmaticScrollRef.current = false;
+          lastScrollTopRef.current = el.scrollTop;
+        });
+      }
+    }
   }, [messages]);
 
   useEffect(() => {
@@ -50,6 +101,38 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  const resizeTextarea = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, MAX_TEXTAREA_HEIGHT) + "px";
+    ta.style.overflowY = ta.scrollHeight > MAX_TEXTAREA_HEIGHT ? "auto" : "hidden";
+  }, []);
+
+  useEffect(() => {
+    resizeTextarea();
+  }, [input, resizeTextarea]);
+
+  // Close model menu on outside click
+  useEffect(() => {
+    if (!showModelMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
+        setShowModelMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showModelMenu]);
+
+  const handleModelChange = (value: string) => {
+    setSelectedModel(value);
+    localStorage.setItem(MODEL_STORAGE_KEY, value);
+    setShowModelMenu(false);
+  };
+
+  const selectedModelLabel = MODEL_OPTIONS.find((m) => m.value === selectedModel)?.label ?? "Sonnet";
 
   const saveMessages = (msgs: ChatMessage[]) => {
     if (sessionId && msgs.length > 0) {
@@ -73,6 +156,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    userScrolledUpRef.current = false;
     const userMessage: ChatMessage = { role: "user", content: input.trim() };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -99,6 +183,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
             message: userMessage.content,
             session_id: sessionId,
             history: history.length > 0 ? history : undefined,
+            model: selectedModel,
           }),
           signal: abortController.signal,
         }
@@ -117,14 +202,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
 
       while (true) {
         const { done, value } = await reader.read();
-        console.log("Stream read:", { done, valueLength: value?.length });
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        console.log("Buffer:", buffer);
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
-        console.log("Lines to process:", lines);
 
         for (const line of lines) {
           const trimmedLine = line.trim();
@@ -134,7 +216,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
 
           try {
             const parsed = JSON.parse(data);
-            console.log("Parsed event:", parsed);
 
             if (parsed.type === "tool_call") {
               setCurrentTool(parsed.tool);
@@ -206,7 +287,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Messages - Scrollable */}
-      <div style={{ flex: 1, overflowY: 'auto' }} className="p-4 space-y-3">
+      <div ref={scrollContainerRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto' }} className="p-4 space-y-3">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12">
             <div className="w-12 h-12 bg-layer-2 rounded-full flex items-center justify-center mb-3">
@@ -223,75 +304,22 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
             key={index}
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
-            <div
-              className={`max-w-[85%] px-3 py-2 rounded-lg ${
-                msg.role === "user"
-                  ? "bg-accent-600 text-white"
-                  : "bg-layer-2 text-gray-900"
-              }`}
-            >
-              {msg.role === "user" ? (
+            {msg.role === "user" ? (
+              <div className="max-w-[85%] px-3 py-2 rounded-lg bg-accent-600 text-white">
                 <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-              ) : (
-                <div className="text-sm">
-                  {msg.content ? (
-                    <ReactMarkdown
-                      components={{
-                        h1: ({ children }) => (
-                          <h1 className="text-base font-semibold mt-3 mb-1.5">
-                            {children}
-                          </h1>
-                        ),
-                        h2: ({ children }) => (
-                          <h2 className="text-sm font-semibold mt-2.5 mb-1">
-                            {children}
-                          </h2>
-                        ),
-                        h3: ({ children }) => (
-                          <h3 className="text-sm font-medium mt-2 mb-1">
-                            {children}
-                          </h3>
-                        ),
-                        p: ({ children }) => (
-                          <p className="my-1">{children}</p>
-                        ),
-                        ul: ({ children }) => (
-                          <ul className="my-1 ml-4 list-disc">{children}</ul>
-                        ),
-                        ol: ({ children }) => (
-                          <ol className="my-1 ml-4 list-decimal">
-                            {children}
-                          </ol>
-                        ),
-                        li: ({ children }) => <li className="my-0.5">{children}</li>,
-                        code: ({ className, children }) => {
-                          const isBlock = className?.includes("language-");
-                          return isBlock ? (
-                            <code className={className}>{children}</code>
-                          ) : (
-                            <code className="bg-gray-200 text-pink-600 px-1 py-0.5 rounded text-xs font-mono">
-                              {children}
-                            </code>
-                          );
-                        },
-                        pre: ({ children }) => (
-                          <pre className="bg-gray-900 text-gray-100 p-3 my-2 rounded-md overflow-x-auto text-xs font-mono">
-                            {children}
-                          </pre>
-                        ),
-                      }}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
-                  ) : isLoading && index === messages.length - 1 ? (
-                    <div className="flex items-center gap-2 text-gray-500">
-                      <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse" />
-                      <span>Thinking...</span>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="w-[90%] prose prose-sm max-w-none text-gray-900">
+                {msg.content ? (
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                ) : isLoading && index === messages.length - 1 ? (
+                  <div className="flex items-center gap-2 text-gray-500 not-prose">
+                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse" />
+                    <span>Thinking...</span>
+                  </div>
+                ) : null}
+              </div>
+            )}
           </div>
         ))}
 
@@ -315,31 +343,70 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
           </div>
         )}
 
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Input - Fixed at bottom */}
       <form
         onSubmit={handleSubmit}
-        className="p-3 border-t border-gray-100 shrink-0"
+        className="px-3 pb-3 pt-2 border-t border-gray-200 shrink-0"
       >
-        <div className="flex gap-2">
+        <div className="border border-gray-200 rounded-xl bg-white focus-within:ring-2 focus-within:ring-accent-500 focus-within:border-transparent transition-shadow">
+          {/* Textarea row */}
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask about your training run..."
             rows={1}
-            className="flex-1 resize-none border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent transition-shadow"
+            className="w-full resize-none px-3 pt-2.5 pb-1 text-sm bg-transparent focus:outline-none"
+            style={{ overflowY: "hidden" }}
             disabled={isLoading}
           />
-          <button
-            type="submit"
-            disabled={isLoading || !input.trim()}
-            className="px-4 py-2 bg-accent-600 text-white text-sm font-medium rounded-lg hover:bg-accent-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            Send
-          </button>
+          {/* Bottom bar: model selector + send button */}
+          <div className="flex items-center justify-between px-2 pb-2">
+            {/* Model selector */}
+            <div ref={modelMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setShowModelMenu((v) => !v)}
+                className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+              >
+                {selectedModelLabel}
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {showModelMenu && (
+                <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-elevated py-1 min-w-[140px] z-10">
+                  {MODEL_OPTIONS.map((m) => (
+                    <button
+                      key={m.value}
+                      type="button"
+                      onClick={() => handleModelChange(m.value)}
+                      className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                        m.value === selectedModel
+                          ? "bg-accent-50 text-accent-700 font-medium"
+                          : "text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Send button */}
+            <button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              className="p-1.5 rounded-lg bg-accent-600 text-white hover:bg-accent-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
         </div>
       </form>
     </div>
