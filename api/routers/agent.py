@@ -22,6 +22,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
     history: list[ChatMessage] | None = None  # Previous conversation messages
+    model: str | None = None  # Override model (e.g. "claude-haiku-4-5-20251001")
 
 
 class ChatResponse(BaseModel):
@@ -52,7 +53,7 @@ def chat(request: Request, body: ChatRequest):
         if body.history:
             history = [{"role": m.role, "content": m.content} for m in body.history]
 
-        response = agent.chat(message=body.message, session_id=body.session_id, history=history)
+        response = agent.chat(message=body.message, session_id=body.session_id, history=history, model=body.model)
         return ChatResponse(
             message=response.message,
             sources=response.sources,
@@ -86,7 +87,7 @@ def chat_stream(request: Request, body: ChatRequest):
 
     def generate():
         try:
-            for chunk in agent.chat_stream(message=body.message, session_id=body.session_id, history=history):
+            for chunk in agent.chat_stream(message=body.message, session_id=body.session_id, history=history, model=body.model):
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"

@@ -23,7 +23,7 @@ class AgentResponse:
 class ObservabilityAgent:
     """LLM-powered agent for training observability."""
 
-    def __init__(self, datastore: DataStore, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, datastore: DataStore, model: str = "claude-sonnet-4-6"):
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY environment variable is required")
@@ -48,13 +48,14 @@ class ObservabilityAgent:
 
         return system_prompt, message, session
 
-    def chat(self, message: str, session_id: str | None = None, history: list[dict] | None = None) -> AgentResponse:
+    def chat(self, message: str, session_id: str | None = None, history: list[dict] | None = None, model: str | None = None) -> AgentResponse:
         """Process a user message and return a response.
 
         Args:
             message: The user's message
             session_id: Optional session ID to scope the conversation
             history: Optional list of previous messages [{"role": "user"|"assistant", "content": "..."}]
+            model: Optional model override for this request
         """
         # Build system prompt with session context
         session = None
@@ -77,7 +78,7 @@ class ObservabilityAgent:
         # Function calling loop
         for _ in range(self.max_iterations):
             response = self.client.messages.create(
-                model=self.model,
+                model=model or self.model,
                 max_tokens=4096,
                 system=system_prompt,
                 tools=TOOL_DEFINITIONS,
@@ -125,13 +126,14 @@ class ObservabilityAgent:
             error="max_iterations_reached",
         )
 
-    def chat_stream(self, message: str, session_id: str | None = None, history: list[dict] | None = None) -> Generator[dict, None, None]:
+    def chat_stream(self, message: str, session_id: str | None = None, history: list[dict] | None = None, model: str | None = None) -> Generator[dict, None, None]:
         """Process a user message and stream the response.
 
         Args:
             message: The user's message
             session_id: Optional session ID to scope the conversation
             history: Optional list of previous messages [{"role": "user"|"assistant", "content": "..."}]
+            model: Optional model override for this request
         """
         system_prompt, message, _ = self._build_context(message, session_id)
 
@@ -153,7 +155,7 @@ class ObservabilityAgent:
             iteration_text = []  # Text collected in this iteration
 
             with self.client.messages.stream(
-                model=self.model,
+                model=model or self.model,
                 max_tokens=4096,
                 system=system_prompt,
                 tools=TOOL_DEFINITIONS,
