@@ -107,6 +107,28 @@ class SQLiteStore(DataStore):
                 )
             """)
 
+            # Chat sessions table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL DEFAULT 'New chat',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Chat messages table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             conn.commit()
 
     def reset(self):
@@ -601,3 +623,65 @@ class SQLiteStore(DataStore):
                 (session_id, last_id),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    # ── Chat session methods ─────────────────────────────────────────
+
+    def create_chat_session(self, session_id: str, title: str = "New chat") -> dict[str, Any]:
+        chat_id = str(uuid.uuid4())
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO chat_sessions (id, session_id, title) VALUES (?, ?, ?)",
+                (chat_id, session_id, title),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM chat_sessions WHERE id = ?", (chat_id,)).fetchone()
+            d = dict(row)
+            d["message_count"] = 0
+            return d
+
+    def get_chat_sessions(self, session_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT cs.*, COALESCE(mc.cnt, 0) AS message_count
+                FROM chat_sessions cs
+                LEFT JOIN (SELECT chat_session_id, COUNT(*) AS cnt FROM chat_messages GROUP BY chat_session_id) mc
+                    ON mc.chat_session_id = cs.id
+                WHERE cs.session_id = ?
+                ORDER BY cs.updated_at DESC
+                """,
+                (session_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def delete_chat_session(self, chat_session_id: str) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT id FROM chat_sessions WHERE id = ?", (chat_session_id,)).fetchone()
+            if not row:
+                return False
+            conn.execute("DELETE FROM chat_sessions WHERE id = ?", (chat_session_id,))
+            conn.commit()
+            return True
+
+    def get_chat_messages(self, chat_session_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM chat_messages WHERE chat_session_id = ? ORDER BY created_at ASC",
+                (chat_session_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def append_chat_message(self, chat_session_id: str, role: str, content: str) -> dict[str, Any]:
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "INSERT INTO chat_messages (chat_session_id, role, content) VALUES (?, ?, ?)",
+                (chat_session_id, role, content),
+            )
+            conn.execute(
+                "UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (chat_session_id,),
+            )
+            conn.commit()
+            msg_id = cursor.lastrowid
+            row = conn.execute("SELECT * FROM chat_messages WHERE id = ?", (msg_id,)).fetchone()
+            return dict(row)

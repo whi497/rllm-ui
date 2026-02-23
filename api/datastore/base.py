@@ -242,3 +242,30 @@ class DataStore(ABC):
     def get_new_logs(self, session_id: str, last_id: int) -> list[dict[str, Any]]:
         """Retrieve logs since last_id."""
         pass
+
+    # ── Chat session methods ─────────────────────────────────────────
+
+    @abstractmethod
+    def create_chat_session(self, session_id: str, title: str = "New chat") -> dict[str, Any]:
+        """Create a new chat session for a training run. Returns the chat session dict."""
+        pass
+
+    @abstractmethod
+    def get_chat_sessions(self, session_id: str) -> list[dict[str, Any]]:
+        """Get all chat sessions for a training run, ordered by updated_at desc."""
+        pass
+
+    @abstractmethod
+    def delete_chat_session(self, chat_session_id: str) -> bool:
+        """Delete a chat session and its messages. Returns True if deleted."""
+        pass
+
+    @abstractmethod
+    def get_chat_messages(self, chat_session_id: str) -> list[dict[str, Any]]:
+        """Get all messages for a chat session, ordered by created_at asc."""
+        pass
+
+    @abstractmethod
+    def append_chat_message(self, chat_session_id: str, role: str, content: str) -> dict[str, Any]:
+        """Append a message to a chat session. Updates the session's updated_at. Returns the message dict."""
+        pass

@@ -129,12 +129,40 @@ class PostgresStore(DataStore):
                     )
                 """)
 
+                # Chat sessions table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS chat_sessions (
+                        id TEXT PRIMARY KEY,
+                        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                        title TEXT NOT NULL DEFAULT 'New chat',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Chat messages table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS chat_messages (
+                        id SERIAL PRIMARY KEY,
+                        chat_session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+                        role TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+                    ON chat_messages(chat_session_id)
+                """)
+
                 conn.commit()
 
     def reset(self):
         """Reset the data store by dropping and recreating all tables."""
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
+                cursor.execute("DROP TABLE IF EXISTS chat_messages CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS chat_sessions CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS logs CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS trajectory_groups CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS episodes CASCADE")
@@ -661,3 +689,71 @@ class PostgresStore(DataStore):
                 )
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
+
+    # ── Chat session methods ─────────────────────────────────────────
+
+    def create_chat_session(self, session_id: str, title: str = "New chat") -> dict[str, Any]:
+        chat_id = str(uuid.uuid4())
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO chat_sessions (id, session_id, title) VALUES (%s, %s, %s) RETURNING *",
+                    (chat_id, session_id, title),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+                d = dict(row)
+                d["message_count"] = 0
+                return d
+
+    def get_chat_sessions(self, session_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT cs.*, COALESCE(mc.cnt, 0) AS message_count
+                    FROM chat_sessions cs
+                    LEFT JOIN (SELECT chat_session_id, COUNT(*) AS cnt FROM chat_messages GROUP BY chat_session_id) mc
+                        ON mc.chat_session_id = cs.id
+                    WHERE cs.session_id = %s
+                    ORDER BY cs.updated_at DESC
+                    """,
+                    (session_id,),
+                )
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    def delete_chat_session(self, chat_session_id: str) -> bool:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM chat_sessions WHERE id = %s", (chat_session_id,))
+                if not cursor.fetchone():
+                    return False
+                cursor.execute("DELETE FROM chat_sessions WHERE id = %s", (chat_session_id,))
+                conn.commit()
+                return True
+
+    def get_chat_messages(self, chat_session_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT * FROM chat_messages WHERE chat_session_id = %s ORDER BY created_at ASC",
+                    (chat_session_id,),
+                )
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    def append_chat_message(self, chat_session_id: str, role: str, content: str) -> dict[str, Any]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO chat_messages (chat_session_id, role, content) VALUES (%s, %s, %s) RETURNING *",
+                    (chat_session_id, role, content),
+                )
+                row = cursor.fetchone()
+                cursor.execute(
+                    "UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                    (chat_session_id,),
+                )
+                conn.commit()
+                return dict(row)

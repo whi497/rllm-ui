@@ -200,6 +200,29 @@ class LogResponse(BaseModel):
     created_at: datetime
 
 
+# Chat session models
+class ChatSessionCreate(BaseModel):
+    session_id: str
+    title: str = "New chat"
+
+
+class ChatSessionResponse(BaseModel):
+    id: str
+    session_id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    message_count: int = 0
+
+
+class ChatMessageResponse(BaseModel):
+    id: int
+    chat_session_id: str
+    role: str
+    content: str
+    created_at: datetime
+
+
 # Health check
 class HealthResponse(BaseModel):
     status: str
