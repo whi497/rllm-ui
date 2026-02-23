@@ -5,6 +5,7 @@ import { RewardChart, getAvailableMetrics } from "./RewardChart";
 import { EpisodePanel } from "./EpisodePanel";
 import { WorkflowDiagram } from "./WorkflowDiagram";
 import { ChatPanel } from "./ChatPanel";
+import { ChatSessionMenu } from "./ChatSessionMenu";
 import { LogsPanel } from "./LogsPanel";
 import { MetricSelectorModal } from "./MetricSelectorModal";
 import { MetricsDashboard } from "./MetricsDashboard";
@@ -123,6 +124,9 @@ export const TrainingRunDetail: React.FC = () => {
   const [renameValue, setRenameValue] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  // Chat session state
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
+
   // Resizable panel state
   const [leftPanelWidth, setLeftPanelWidth] = useState(320);
   const [rightPanelWidth, setRightPanelWidth] = useState(384);
@@ -181,6 +185,17 @@ export const TrainingRunDetail: React.FC = () => {
     if (sessionId) {
       fetchSessionDetails();
       fetchEpisodes();
+      // Load most recent chat session
+      fetch(`${API_BASE_URL}/api/agent/sessions?session_id=${sessionId}`)
+        .then((r) => r.ok ? r.json() : [])
+        .then((sessions: { id: string }[]) => {
+          if (sessions.length > 0) {
+            setActiveChatSessionId(sessions[0].id);
+          } else {
+            setActiveChatSessionId(null);
+          }
+        })
+        .catch(() => setActiveChatSessionId(null));
     }
   }, [sessionId]);
 
@@ -610,11 +625,46 @@ export const TrainingRunDetail: React.FC = () => {
               }} 
               className="bg-white"
             >
-              <div className="px-4 h-14 border-b border-gray-200 flex items-center" style={{ flexShrink: 0 }}>
+              <div className="px-4 h-14 border-b border-gray-200 flex items-center justify-between" style={{ flexShrink: 0 }}>
                 <span className="text-sm font-medium text-gray-900">Agent</span>
+                {sessionId && (
+                  <ChatSessionMenu
+                    sessionId={sessionId}
+                    activeChatSessionId={activeChatSessionId}
+                    onSelect={(id) => setActiveChatSessionId(id)}
+                    onNew={async () => {
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/api/agent/sessions`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ session_id: sessionId }),
+                        });
+                        if (res.ok) {
+                          const cs = await res.json();
+                          setActiveChatSessionId(cs.id);
+                        }
+                      } catch { /* ignore */ }
+                    }}
+                    onDelete={async (id) => {
+                      try {
+                        await fetch(`${API_BASE_URL}/api/agent/sessions/${id}`, { method: "DELETE" });
+                        if (id === activeChatSessionId) {
+                          // Switch to another session or clear
+                          const res = await fetch(`${API_BASE_URL}/api/agent/sessions?session_id=${sessionId}`);
+                          const sessions = res.ok ? await res.json() : [];
+                          setActiveChatSessionId(sessions.length > 0 ? sessions[0].id : null);
+                        }
+                      } catch { /* ignore */ }
+                    }}
+                  />
+                )}
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
-                <ChatPanel sessionId={sessionId} />
+                <ChatPanel
+                  sessionId={sessionId}
+                  activeChatSessionId={activeChatSessionId}
+                  onChatSessionIdChange={setActiveChatSessionId}
+                />
               </div>
             </div>
           </div>

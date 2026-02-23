@@ -9,9 +9,10 @@ interface ChatMessage {
 
 interface ChatPanelProps {
   sessionId?: string;
+  activeChatSessionId: string | null;
+  onChatSessionIdChange: (id: string | null) => void;
 }
 
-const CHAT_STORAGE_KEY = "rllm_chat_messages_";
 const MODEL_STORAGE_KEY = "rllm_chat_model";
 const MAX_TEXTAREA_HEIGHT = 200;
 
@@ -21,7 +22,11 @@ const MODEL_OPTIONS = [
   { label: "Opus 4.6", value: "claude-opus-4-6" },
 ] as const;
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({
+  sessionId,
+  activeChatSessionId,
+  onChatSessionIdChange,
+}) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -41,22 +46,37 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
 
+  // Load messages when activeChatSessionId changes
   useEffect(() => {
-    if (!sessionId) {
+    if (!activeChatSessionId) {
       setMessages([]);
       return;
     }
-    const stored = localStorage.getItem(CHAT_STORAGE_KEY + sessionId);
-    if (stored) {
+    let cancelled = false;
+    const loadMessages = async () => {
       try {
-        setMessages(JSON.parse(stored));
+        const res = await fetch(
+          `${API_BASE_URL}/api/agent/sessions/${activeChatSessionId}/messages`
+        );
+        if (!res.ok) throw new Error("Failed to load messages");
+        const data = await res.json();
+        if (!cancelled) {
+          setMessages(
+            data.map((m: { role: string; content: string }) => ({
+              role: m.role as "user" | "assistant",
+              content: m.content,
+            }))
+          );
+        }
       } catch {
-        setMessages([]);
+        if (!cancelled) setMessages([]);
       }
-    } else {
-      setMessages([]);
-    }
-  }, [sessionId]);
+    };
+    loadMessages();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChatSessionId]);
 
   const handleScroll = () => {
     const el = scrollContainerRef.current;
@@ -134,16 +154,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
 
   const selectedModelLabel = MODEL_OPTIONS.find((m) => m.value === selectedModel)?.label ?? "Sonnet";
 
-  const saveMessages = (msgs: ChatMessage[]) => {
-    if (sessionId && msgs.length > 0) {
-      const toSave = msgs.filter((m) => m.content.trim());
-      localStorage.setItem(
-        CHAT_STORAGE_KEY + sessionId,
-        JSON.stringify(toSave)
-      );
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -182,6 +192,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
           body: JSON.stringify({
             message: userMessage.content,
             session_id: sessionId,
+            chat_session_id: activeChatSessionId || undefined,
             history: history.length > 0 ? history : undefined,
             model: selectedModel,
           }),
@@ -217,7 +228,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
           try {
             const parsed = JSON.parse(data);
 
-            if (parsed.type === "tool_call") {
+            if (parsed.type === "chat_session") {
+              // Backend sends this early so we can track the session immediately
+              if (parsed.chat_session_id && parsed.chat_session_id !== activeChatSessionId) {
+                onChatSessionIdChange(parsed.chat_session_id);
+              }
+            } else if (parsed.type === "tool_call") {
               setCurrentTool(parsed.tool);
               wasUsingToolRef.current = true;
             } else if (parsed.type === "text") {
@@ -236,10 +252,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
                 return updated;
               });
             } else if (parsed.type === "done") {
-              setMessages((prev) => {
-                saveMessages(prev);
-                return prev;
-              });
+              // Update chat session ID if auto-created by backend
+              if (parsed.chat_session_id && parsed.chat_session_id !== activeChatSessionId) {
+                onChatSessionIdChange(parsed.chat_session_id);
+              }
             } else if (parsed.type === "error") {
               setError(parsed.message);
               setMessages((prev) => {
@@ -255,11 +271,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ sessionId }) => {
           }
         }
       }
-
-      setMessages((prev) => {
-        saveMessages(prev);
-        return prev;
-      });
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return;
 
