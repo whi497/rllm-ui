@@ -27,9 +27,6 @@ export const SettingsPage: React.FC = () => {
     <div className="flex-1 flex min-h-0">
       {/* Left nav */}
       <div className="w-[200px] flex-shrink-0 bg-white border-r border-gray-200 py-4 px-2">
-        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-3 mb-2">
-          Settings
-        </h2>
         <nav className="space-y-0.5">
           {NAV_ITEMS.map((item) => (
             <button
@@ -189,7 +186,6 @@ const ApiKeySection: React.FC = () => {
           title="New API Key"
           subtitle="Your previous key has been revoked."
           buttonLabel="Done"
-          icon="refresh"
         />
       )}
     </section>
