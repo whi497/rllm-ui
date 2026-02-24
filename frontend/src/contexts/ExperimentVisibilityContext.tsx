@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from "react";
-import { API_BASE_URL } from "../config/api";
+import { apiFetch } from "../config/api";
 
 interface ExperimentVisibilityState {
   hiddenExperiments: Set<string>;
@@ -65,7 +65,7 @@ export const ExperimentVisibilityProvider: React.FC<{
     // Optimistic update — all consumers re-render immediately
     setColorOverrides((prev) => ({ ...prev, [sessionId]: color }));
     // Fire PATCH in background
-    fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
+    apiFetch(`/api/sessions/${sessionId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ color }),

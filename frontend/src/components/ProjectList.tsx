@@ -4,7 +4,7 @@ import { SearchIcon, WarningIcon, BarChartIcon } from './icons';
 import { Spinner, EmptyState } from './ui';
 import { ActionMenu } from './ActionMenu';
 import { ConfirmDialog } from './ConfirmDialog';
-import { API_BASE_URL } from '../config/api';
+import { apiFetch } from '../config/api';
 
 type SessionStatus = "running" | "completed" | "failed" | "crashed";
 
@@ -43,7 +43,7 @@ export const ProjectList: React.FC = () => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/sessions`);
+      const response = await apiFetch("/api/sessions");
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -52,7 +52,10 @@ export const ProjectList: React.FC = () => {
       const data = await response.json();
       setSessions(data);
     } catch (err: any) {
-      if (!initialLoadDone.current) setError(err.message);
+      if (!initialLoadDone.current) {
+        // On first load failure (e.g. right after registration), show empty state
+        setSessions([]);
+      }
     } finally {
       setLoading(false);
       initialLoadDone.current = true;
@@ -132,7 +135,7 @@ export const ProjectList: React.FC = () => {
     const trimmed = renameValue.trim();
     if (!trimmed) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/sessions/projects/${projectId}`, {
+      const res = await apiFetch(`/api/sessions/projects/${projectId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ new_name: trimmed }),
@@ -148,7 +151,7 @@ export const ProjectList: React.FC = () => {
 
   const handleDeleteProject = async (projectId: string) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/sessions/projects/${projectId}`, {
+      const res = await apiFetch(`/api/sessions/projects/${projectId}`, {
         method: 'DELETE',
       });
       if (res.ok) {
@@ -174,7 +177,7 @@ export const ProjectList: React.FC = () => {
         <div className="max-w-2xl mx-auto">
           <div className="bg-layer-1 border border-gray-300 rounded-xl p-6 mb-4">
             <div className="flex items-start gap-3">
-              <WarningIcon sx={{ fontSize: 28 }} className="text-black" />
+              <WarningIcon size={28} className="text-black" />
               <div className="flex-1">
                 <h3 className="text-sm font-semibold text-black mb-1">Error loading sessions</h3>
                 <p className="text-sm text-gray-700">{error}</p>
@@ -199,28 +202,28 @@ export const ProjectList: React.FC = () => {
       <div className="w-full">
         {/* Header */}
         <div className="mb-4">
-          <h1 className="text-xl font-semibold text-black mb-2">Projects</h1>
+          <h1 className="text-lg font-semibold text-black mb-2">Projects</h1>
         </div>
 
         {/* Search */}
         <div className="mb-6">
           <div className="relative max-w-md">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <SearchIcon sx={{ fontSize: 20 }} className="text-gray-400" />
+              <SearchIcon size={18} className="text-gray-400" />
             </div>
             <input
               type="text"
               placeholder="Search projects and runs..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 text-base border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400 transition-all duration-200"
+              className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400 transition-all duration-200"
             />
           </div>
         </div>
 
         {/* Summary */}
         <div className="mb-4">
-          <p className="text-base text-gray-600">
+          <p className="text-sm text-gray-600">
             <span className="font-medium text-black">{filteredProjects.length}</span> project{filteredProjects.length !== 1 ? 's' : ''}{' '}
             &middot; <span className="font-medium text-black">{totalRuns}</span> run{totalRuns !== 1 ? 's' : ''}
           </p>
@@ -230,7 +233,7 @@ export const ProjectList: React.FC = () => {
         {filteredProjects.length === 0 ? (
           <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
             <EmptyState
-              icon={<BarChartIcon sx={{ fontSize: 32 }} className="text-gray-400" />}
+              icon={<BarChartIcon size={32} className="text-gray-400" />}
               title={searchQuery ? 'No matching training runs' : 'No training runs yet'}
               iconSize="lg"
             />
@@ -247,7 +250,7 @@ export const ProjectList: React.FC = () => {
                   onClick={() => {
                     if (!isRenaming) navigate(`/project/${project.id}`);
                   }}
-                  className="bg-white border border-gray-200 rounded-xl p-5 text-left hover:border-gray-300 hover:shadow-sm transition-all group relative cursor-pointer"
+                  className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-gray-300 hover:shadow-sm transition-all group relative cursor-pointer"
                 >
                   <div className="flex items-start justify-between gap-2">
                     {isRenaming ? (
@@ -261,10 +264,10 @@ export const ProjectList: React.FC = () => {
                         }}
                         onBlur={() => handleRenameProject(project.id)}
                         onClick={(e) => e.stopPropagation()}
-                        className="text-base font-semibold text-black mb-1 truncate flex-1 min-w-0 border border-gray-300 rounded px-1.5 py-0.5 outline-none ring-0 focus:border-gray-300 focus:ring-0 focus:outline-none"
+                        className="text-sm font-semibold text-black mb-1 truncate flex-1 min-w-0 border border-gray-300 rounded px-1.5 py-0.5 outline-none ring-0 focus:border-gray-300 focus:ring-0 focus:outline-none"
                       />
                     ) : (
-                      <div className="text-base font-semibold text-black mb-1 truncate group-hover:text-accent-700 flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-black mb-1 truncate group-hover:text-accent-700 flex-1 min-w-0">
                         {project.project}
                       </div>
                     )}
@@ -278,7 +281,7 @@ export const ProjectList: React.FC = () => {
                       />
                     </div>
                   </div>
-                  <div className="text-sm text-gray-500">
+                  <div className="text-xs text-gray-500">
                     {project.sessions.length} run{project.sessions.length !== 1 ? 's' : ''}
                     {latestSession && (
                       <span className="text-gray-400"> &middot; {getLastRequestTime(latestSession)}</span>

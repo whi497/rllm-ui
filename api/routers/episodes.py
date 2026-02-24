@@ -1,5 +1,6 @@
 """Episodes router - handles episode/trajectory data."""
 
+from auth import CurrentUser
 from fastapi import APIRouter, HTTPException, Query, Request
 from models import EpisodeCreate, EpisodeResponse, EpisodeSearchResponse
 
@@ -7,7 +8,7 @@ router = APIRouter(prefix="/api", tags=["episodes"])
 
 
 @router.post("/episodes", response_model=EpisodeResponse)
-def create_episode(request: Request, episode: EpisodeCreate):
+def create_episode(request: Request, episode: EpisodeCreate, user: CurrentUser):
     """Receive and store episode data with trajectories."""
     store = request.app.state.store
 
@@ -30,7 +31,7 @@ def create_episode(request: Request, episode: EpisodeCreate):
 
 
 @router.get("/episodes", response_model=list[EpisodeResponse])
-def get_episodes(request: Request, session_id: str = Query(..., description="Filter episodes by session ID")):
+def get_episodes(request: Request, user: CurrentUser, session_id: str = Query(..., description="Filter episodes by session ID")):
     """Query episodes by session ID."""
     store = request.app.state.store
 
@@ -45,6 +46,7 @@ def get_episodes(request: Request, session_id: str = Query(..., description="Fil
 @router.get("/episodes/search", response_model=EpisodeSearchResponse)
 def search_episodes(
     request: Request,
+    user: CurrentUser,
     q: str = Query(..., description="Search query"),
     session_id: str | None = Query(None, description="Optional session ID to filter results"),
     step: int | None = Query(None, description="Optional step number to filter results"),
@@ -64,7 +66,7 @@ def search_episodes(
 
 
 @router.get("/episodes/{episode_id}", response_model=EpisodeResponse)
-def get_episode(request: Request, episode_id: str):
+def get_episode(request: Request, episode_id: str, user: CurrentUser):
     """Get a single episode with full trajectory data."""
     store = request.app.state.store
     episode = store.get_episode(episode_id)

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import { API_BASE_URL } from "../config/api";
+import { apiFetch } from "../config/api";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -55,8 +55,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     let cancelled = false;
     const loadMessages = async () => {
       try {
-        const res = await fetch(
-          `${API_BASE_URL}/api/agent/sessions/${activeChatSessionId}/messages`
+        const res = await apiFetch(
+          `/api/agent/sessions/${activeChatSessionId}/messages`
         );
         if (!res.ok) throw new Error("Failed to load messages");
         const data = await res.json();
@@ -116,11 +116,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   }, [messages]);
 
-  useEffect(() => {
-    return () => {
-      abortControllerRef.current?.abort();
-    };
-  }, []);
+  // Note: We intentionally do NOT abort the stream on unmount.
+  // The ChatPanel can unmount when the user switches tabs, but the stream
+  // should continue so the response is saved. Messages reload from the API
+  // when the component remounts.
 
   const resizeTextarea = useCallback(() => {
     const ta = textareaRef.current;
@@ -184,8 +183,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         .filter((m) => m.content.trim())
         .map((m) => ({ role: m.role, content: m.content }));
 
-      const response = await fetch(
-        `${API_BASE_URL}/api/agent/chat/stream`,
+      const response = await apiFetch(
+        "/api/agent/chat/stream",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

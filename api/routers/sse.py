@@ -5,6 +5,7 @@ import json
 import time
 from collections.abc import AsyncGenerator
 
+from auth import CurrentUser
 from datastore.base import DataStore
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -50,7 +51,7 @@ async def metrics_event_generator(session_id: str, store: DataStore) -> AsyncGen
 
 
 @router.get("/sessions/{session_id}/metrics/stream")
-async def stream_metrics(request: Request, session_id: str):
+async def stream_metrics(request: Request, session_id: str, user: CurrentUser):
     """Stream metrics for a session via SSE."""
     store = request.app.state.store
     return StreamingResponse(
@@ -87,7 +88,7 @@ async def logs_event_generator(session_id: str, store: DataStore) -> AsyncGenera
 
 
 @router.get("/sessions/{session_id}/logs/stream")
-async def stream_logs(request: Request, session_id: str):
+async def stream_logs(request: Request, session_id: str, user: CurrentUser):
     """Stream logs for a session via SSE."""
     store = request.app.state.store
     return StreamingResponse(

@@ -1,5 +1,6 @@
 """Metrics router."""
 
+from auth import CurrentUser
 from fastapi import APIRouter, HTTPException, Request
 from models import MetricsCreate, MetricsResponse
 
@@ -7,7 +8,7 @@ router = APIRouter(prefix="/api", tags=["metrics"])
 
 
 @router.post("/metrics", response_model=MetricsResponse)
-def create_metrics(request: Request, metrics: MetricsCreate):
+def create_metrics(request: Request, metrics: MetricsCreate, user: CurrentUser):
     """Receive and store metrics from training."""
     store = request.app.state.store
 
@@ -23,7 +24,7 @@ def create_metrics(request: Request, metrics: MetricsCreate):
 
 
 @router.get("/sessions/{session_id}/metrics", response_model=list[MetricsResponse])
-def get_session_metrics(request: Request, session_id: str):
+def get_session_metrics(request: Request, session_id: str, user: CurrentUser):
     """Get all metrics for a session."""
     store = request.app.state.store
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { API_BASE_URL } from '../config/api';
+import { API_BASE_URL, apiFetch } from '../config/api';
 
 export interface Metric {
     id: number;
@@ -44,7 +44,7 @@ export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
             try {
                 // Fetch historical metrics
                 console.log('[Metrics] Fetching initial metrics...');
-                const response = await fetch(`${apiUrl}/api/sessions/${sessionId}/metrics`);
+                const response = await apiFetch(`/api/sessions/${sessionId}/metrics`);
                 if (aborted) return;
                 if (response.ok) {
                     const data: Metric[] = await response.json();
@@ -131,7 +131,7 @@ export function useLogsSSE({ sessionId, enabled = true }: UseSSEOptions) {
 
         const initialize = async () => {
             try {
-                const response = await fetch(`${apiUrl}/api/sessions/${sessionId}/logs?limit=5000`);
+                const response = await apiFetch(`/api/sessions/${sessionId}/logs?limit=5000`);
                 if (aborted) return;
                 if (response.ok) {
                     const data: LogEntry[] = await response.json();

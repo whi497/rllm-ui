@@ -1,5 +1,6 @@
 """Trajectory Groups router - handles trajectory group data."""
 
+from auth import CurrentUser
 from fastapi import APIRouter, HTTPException, Query, Request
 from models import TrajectoryGroupCreate, TrajectoryGroupListResponse, TrajectoryGroupResponse, TrajectoryGroupSearchResponse
 
@@ -7,7 +8,7 @@ router = APIRouter(prefix="/api", tags=["trajectory-groups"])
 
 
 @router.post("/trajectory-groups", response_model=TrajectoryGroupResponse)
-def create_trajectory_group(request: Request, group: TrajectoryGroupCreate):
+def create_trajectory_group(request: Request, group: TrajectoryGroupCreate, user: CurrentUser):
     """Receive and store trajectory group data."""
     store = request.app.state.store
 
@@ -30,6 +31,7 @@ def create_trajectory_group(request: Request, group: TrajectoryGroupCreate):
 @router.get("/trajectory-groups", response_model=TrajectoryGroupListResponse)
 def get_trajectory_groups(
     request: Request,
+    user: CurrentUser,
     session_id: str = Query(..., description="Session ID"),
     step: int | None = Query(None, description="Optional step filter"),
 ):
@@ -47,6 +49,7 @@ def get_trajectory_groups(
 @router.get("/trajectory-groups/search", response_model=TrajectoryGroupSearchResponse)
 def search_trajectory_groups(
     request: Request,
+    user: CurrentUser,
     q: str = Query(..., description="Search query"),
     session_id: str | None = Query(None),
     step: int | None = Query(None),
@@ -60,6 +63,7 @@ def search_trajectory_groups(
 def get_trajectory_group(
     request: Request,
     group_id: str,
+    user: CurrentUser,
     include_trajectories: bool = Query(True, description="Include full trajectory data from episodes"),
 ):
     """Get a single trajectory group, optionally with full trajectory data fetched from episodes."""
