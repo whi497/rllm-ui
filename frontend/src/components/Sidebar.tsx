@@ -2,6 +2,9 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
   FolderOpenIcon,
+  SettingsIcon,
+  MenuBookIcon,
+  NorthEastIcon,
   SidebarCollapseIcon,
   SidebarExpandIcon,
   VisibilityIcon,
@@ -13,8 +16,9 @@ import { ActionMenu } from "./ActionMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { getExperimentColor } from "../utils/experimentColors";
 import { useExperimentVisibility } from "../contexts/ExperimentVisibilityContext";
-import { API_BASE_URL } from "../config/api";
+import { apiFetch } from "../config/api";
 import { useClickOutside } from "./ui";
+import { useAuth } from "../contexts/AuthContext";
 
 interface Session {
   id: string;
@@ -46,6 +50,8 @@ export const Sidebar: React.FC = () => {
     location.pathname === "/" ||
     location.pathname.startsWith("/runs") ||
     location.pathname.startsWith("/project");
+
+  const isSettingsActive = location.pathname === "/settings";
 
   // Are we on a project overview page?
   const projectOverviewMatch = useMemo(() => {
@@ -79,7 +85,7 @@ export const Sidebar: React.FC = () => {
   // Fetch projects
   const fetchProjects = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/sessions`);
+      const response = await apiFetch("/api/sessions");
       if (!response.ok) return;
       const data: Session[] = await response.json();
 
@@ -104,14 +110,14 @@ export const Sidebar: React.FC = () => {
     return () => clearInterval(interval);
   }, [fetchProjects]);
 
-  // Auto-collapse main sidebar when navigating deeper (project overview or run)
+  // Auto-collapse main sidebar when navigating away from home (project overview, run, or settings)
   useEffect(() => {
-    if (projectOverviewMatch || activeSessionId) {
+    if (projectOverviewMatch || activeSessionId || isSettingsActive) {
       setIsCollapsed(true);
     } else {
       setIsCollapsed(false);
     }
-  }, [projectOverviewMatch, activeSessionId]);
+  }, [projectOverviewMatch, activeSessionId, isSettingsActive]);
 
   // Drag resize for experiments panel
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -180,9 +186,9 @@ export const Sidebar: React.FC = () => {
             title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {isCollapsed ? (
-              <SidebarExpandIcon sx={{ fontSize: 18 }} />
+              <SidebarExpandIcon size={18} />
             ) : (
-              <SidebarCollapseIcon sx={{ fontSize: 18 }} />
+              <SidebarCollapseIcon size={18} />
             )}
           </button>
         </div>
@@ -203,10 +209,50 @@ export const Sidebar: React.FC = () => {
             `}
             title={isCollapsed ? "Projects" : undefined}
           >
-            <FolderOpenIcon sx={{ fontSize: 18 }} className="flex-shrink-0" />
+            <FolderOpenIcon size={18} className="flex-shrink-0" />
             {!isCollapsed && <span>Projects</span>}
           </Link>
+          <Link
+            to="/settings"
+            className={`
+              flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
+              transition-colors duration-150
+              ${isCollapsed ? "justify-center" : ""}
+              ${
+                isSettingsActive
+                  ? "bg-accent-50 text-accent-700"
+                  : "text-gray-600 hover:bg-layer-1 hover:text-gray-900"
+              }
+            `}
+            title={isCollapsed ? "Settings" : undefined}
+          >
+            <SettingsIcon size={18} className="flex-shrink-0" />
+            {!isCollapsed && <span>Settings</span>}
+          </Link>
+          <a
+            href="https://rllm-project.readthedocs.io/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`
+              flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
+              transition-colors duration-150
+              text-gray-600 hover:bg-layer-1 hover:text-gray-900
+              ${isCollapsed ? "justify-center" : ""}
+            `}
+            title={isCollapsed ? "Docs" : undefined}
+          >
+            <MenuBookIcon size={18} className="flex-shrink-0" />
+            {!isCollapsed && (
+              <>
+                <span>Docs</span>
+                <NorthEastIcon size={14} className="flex-shrink-0 text-gray-400" />
+              </>
+            )}
+          </a>
         </nav>
+
+        {/* User menu (cloud mode only) */}
+        <UserMenu isCollapsed={isCollapsed} />
       </div>
 
       {/* Experiments panel — only on project overview */}
@@ -231,6 +277,32 @@ export const Sidebar: React.FC = () => {
         </>
       )}
     </aside>
+  );
+};
+
+/* ─── User Menu (cloud mode only) ──────────────────────────────────── */
+
+const UserMenu: React.FC<{ isCollapsed: boolean }> = ({ isCollapsed }) => {
+  const { config, user } = useAuth();
+
+  if (!config?.auth_required || !user) return null;
+
+  const initials = (user.name || user.email)[0].toUpperCase();
+
+  return (
+    <div className="px-2 pb-2">
+      <div
+        className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm text-gray-600 ${isCollapsed ? "justify-center" : ""}`}
+        title={isCollapsed ? user.email : undefined}
+      >
+        <span className="w-6 h-6 rounded-full bg-accent-100 text-accent-700 flex items-center justify-center text-xs font-medium flex-shrink-0">
+          {initials}
+        </span>
+        {!isCollapsed && (
+          <span className="truncate text-xs">{user.email}</span>
+        )}
+      </div>
+    </div>
   );
 };
 
@@ -275,7 +347,7 @@ const ExperimentsPanel: React.FC<{
     const trimmed = projectRenameValue.trim();
     if (!trimmed) { setIsRenamingProject(false); renamingProjectRef.current = false; return; }
     try {
-      const res = await fetch(`${API_BASE_URL}/api/sessions/projects/${project.id}`, {
+      const res = await apiFetch(`/api/sessions/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ new_name: trimmed }),
@@ -288,7 +360,7 @@ const ExperimentsPanel: React.FC<{
 
   const handleDeleteProject = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/sessions/projects/${project.id}`, {
+      const res = await apiFetch(`/api/sessions/projects/${project.id}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -306,7 +378,7 @@ const ExperimentsPanel: React.FC<{
     const trimmed = sessionRenameValue.trim();
     if (!trimmed) { setRenamingSessionId(null); renamingSessionRef.current = false; return; }
     try {
-      const res = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
+      const res = await apiFetch(`/api/sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ new_experiment_name: trimmed }),
@@ -319,7 +391,7 @@ const ExperimentsPanel: React.FC<{
 
   const handleDeleteSession = async (sessionId: string) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
+      const res = await apiFetch(`/api/sessions/${sessionId}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -378,7 +450,7 @@ const ExperimentsPanel: React.FC<{
             className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-layer-2 transition-colors"
             title="Visibility options"
           >
-            <VisibilityIcon sx={{ fontSize: 16 }} />
+            <VisibilityIcon size={16} />
           </button>
           {eyeMenuOpen && (
             <div className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 w-36">
@@ -389,7 +461,7 @@ const ExperimentsPanel: React.FC<{
                 }}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-layer-1 transition-colors"
               >
-                <VisibilityIcon sx={{ fontSize: 16 }} />
+                <VisibilityIcon size={16} />
                 Show all
               </button>
               <button
@@ -399,7 +471,7 @@ const ExperimentsPanel: React.FC<{
                 }}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-layer-1 transition-colors"
               >
-                <VisibilityOffIcon sx={{ fontSize: 16 }} />
+                <VisibilityOffIcon size={16} />
                 Hide all
               </button>
             </div>
@@ -408,7 +480,7 @@ const ExperimentsPanel: React.FC<{
         {/* Search */}
         <div className="flex-1 relative">
           <SearchIcon
-            sx={{ fontSize: 14 }}
+            size={14}
             className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"
           />
           <input
@@ -459,11 +531,11 @@ const ExperimentsPanel: React.FC<{
                 style={{ color: isHidden ? "#d1d5db" : color }}
               >
                 {isPinned ? (
-                  <PushPinIcon sx={{ fontSize: 18 }} />
+                  <PushPinIcon size={18} />
                 ) : isHidden ? (
-                  <VisibilityOffIcon sx={{ fontSize: 18 }} />
+                  <VisibilityOffIcon size={18} />
                 ) : (
-                  <VisibilityIcon sx={{ fontSize: 18 }} />
+                  <VisibilityIcon size={18} />
                 )}
               </button>
 
