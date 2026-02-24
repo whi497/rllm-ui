@@ -323,7 +323,8 @@ class ToolExecutor:
         step = params.get("step")
         limit = params.get("limit", 20)
 
-        result = self.datastore.search_episodes(query, session_id, limit, step)
+        result = self.datastore.search_episodes(query, session_id, step=step)
+        result["episodes"] = result.get("episodes", [])[:limit]
 
         # Format episodes for readability
         formatted = []
