@@ -32,13 +32,88 @@ class PostgresStore(DataStore):
         """Initialize the database schema."""
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
-                # Projects table
+                # Users table (cloud mode)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id TEXT PRIMARY KEY,
+                        email TEXT NOT NULL UNIQUE,
+                        password_hash TEXT,
+                        name TEXT,
+                        api_key TEXT UNIQUE,
+                        oauth_provider TEXT,
+                        oauth_provider_id TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(oauth_provider, oauth_provider_id)
+                    )
+                """)
+
+                # Migration: make password_hash nullable and add OAuth columns for existing DBs
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+                    EXCEPTION WHEN others THEN NULL;
+                    END $$;
+                """)
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider TEXT;
+                    EXCEPTION WHEN others THEN NULL;
+                    END $$;
+                """)
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider_id TEXT;
+                    EXCEPTION WHEN others THEN NULL;
+                    END $$;
+                """)
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE users ADD CONSTRAINT uq_users_oauth UNIQUE (oauth_provider, oauth_provider_id);
+                    EXCEPTION WHEN duplicate_table THEN NULL;
+                    WHEN duplicate_object THEN NULL;
+                    END $$;
+                """)
+
+                # Projects table (with optional owner_id for multi-tenancy)
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS projects (
                         id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL UNIQUE,
+                        name TEXT NOT NULL,
+                        owner_id TEXT REFERENCES users(id) ON DELETE CASCADE,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
+                """)
+
+                # Add owner_id column if it doesn't exist (migration for existing DBs)
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_id TEXT REFERENCES users(id) ON DELETE CASCADE;
+                    EXCEPTION WHEN others THEN NULL;
+                    END $$;
+                """)
+
+                # Migration: update existing FK to add ON DELETE CASCADE
+                cursor.execute("""
+                    DO $$ BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints
+                            WHERE table_name = 'projects' AND constraint_type = 'FOREIGN KEY'
+                            AND constraint_name = 'projects_owner_id_fkey'
+                        ) THEN
+                            ALTER TABLE projects DROP CONSTRAINT projects_owner_id_fkey;
+                            ALTER TABLE projects ADD CONSTRAINT projects_owner_id_fkey
+                                FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE;
+                        END IF;
+                    END $$;
+                """)
+
+                # Unique constraint: project name per owner (NULL owner = local mode)
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE projects ADD CONSTRAINT uq_projects_name_owner UNIQUE (name, owner_id);
+                    EXCEPTION WHEN duplicate_table THEN NULL;
+                    WHEN duplicate_object THEN NULL;
+                    END $$;
                 """)
 
                 # Sessions table
@@ -129,6 +204,16 @@ class PostgresStore(DataStore):
                     )
                 """)
 
+                # User settings table (key-value per user, values encrypted at rest)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS user_settings (
+                        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        key TEXT NOT NULL,
+                        value TEXT NOT NULL,
+                        PRIMARY KEY (user_id, key)
+                    )
+                """)
+
                 # Chat sessions table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -161,6 +246,7 @@ class PostgresStore(DataStore):
         """Reset the data store by dropping and recreating all tables."""
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
+                cursor.execute("DROP TABLE IF EXISTS user_settings CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS chat_messages CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS chat_sessions CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS logs CASCADE")
@@ -169,20 +255,146 @@ class PostgresStore(DataStore):
                 cursor.execute("DROP TABLE IF EXISTS metrics CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS sessions CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS projects CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS users CASCADE")
                 conn.commit()
         self.init_db()
 
-    # ── Project methods ──────────────────────────────────────────────
+    # ── User methods ───────────────────────────────────────────────
 
-    def get_or_create_project(self, name: str) -> str:
+    def create_user(self, user_id: str, email: str, password_hash: str, name: str | None, api_key: str) -> dict[str, Any]:
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM projects WHERE name = %s", (name,))
+                cursor.execute(
+                    "INSERT INTO users (id, email, password_hash, name, api_key) VALUES (%s, %s, %s, %s, %s) RETURNING *",
+                    (user_id, email, password_hash, name, api_key),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+                return dict(row)
+
+    def get_user_by_email(self, email: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+
+    def get_user_by_api_key(self, api_key: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM users WHERE api_key = %s", (api_key,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+
+    def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+
+    def get_user_by_oauth(self, provider: str, provider_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT * FROM users WHERE oauth_provider = %s AND oauth_provider_id = %s",
+                    (provider, provider_id),
+                )
+                row = cursor.fetchone()
+                return dict(row) if row else None
+
+    def create_oauth_user(self, user_id: str, email: str, name: str | None, api_key: str,
+                          oauth_provider: str, oauth_provider_id: str) -> dict[str, Any]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO users (id, email, name, api_key, oauth_provider, oauth_provider_id) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
+                    (user_id, email, name, api_key, oauth_provider, oauth_provider_id),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+                return dict(row)
+
+    def link_oauth_to_user(self, user_id: str, oauth_provider: str, oauth_provider_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET oauth_provider = %s, oauth_provider_id = %s WHERE id = %s RETURNING *",
+                    (oauth_provider, oauth_provider_id, user_id),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+                return dict(row) if row else None
+
+    def update_user_api_key(self, user_id: str, new_api_key: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET api_key = %s WHERE id = %s RETURNING *",
+                    (new_api_key, user_id),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+                return dict(row) if row else None
+
+    def delete_user(self, user_id: str) -> bool:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
+                deleted = cursor.rowcount > 0
+                conn.commit()
+                return deleted
+
+    # ── User settings methods ─────────────────────────────────────
+
+    def get_user_settings(self, user_id: str) -> dict[str, str]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT key, value FROM user_settings WHERE user_id = %s",
+                    (user_id,),
+                )
+                return {row["key"]: row["value"] for row in cursor.fetchall()}
+
+    def set_user_setting(self, user_id: str, key: str, value: str) -> None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO user_settings (user_id, key, value)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value
+                    """,
+                    (user_id, key, value),
+                )
+                conn.commit()
+
+    def delete_user_setting(self, user_id: str, key: str) -> bool:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM user_settings WHERE user_id = %s AND key = %s",
+                    (user_id, key),
+                )
+                deleted = cursor.rowcount > 0
+                conn.commit()
+                return deleted
+
+    # ── Project methods ──────────────────────────────────────────────
+
+    def get_or_create_project(self, name: str, owner_id: str | None = None) -> str:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                if owner_id:
+                    cursor.execute("SELECT id FROM projects WHERE name = %s AND owner_id = %s", (name, owner_id))
+                else:
+                    cursor.execute("SELECT id FROM projects WHERE name = %s AND owner_id IS NULL", (name,))
                 row = cursor.fetchone()
                 if row:
                     return row["id"]
                 project_id = str(uuid.uuid4())
-                cursor.execute("INSERT INTO projects (id, name) VALUES (%s, %s)", (project_id, name))
+                cursor.execute("INSERT INTO projects (id, name, owner_id) VALUES (%s, %s, %s)", (project_id, name, owner_id))
                 conn.commit()
                 return project_id
 
@@ -198,10 +410,16 @@ class PostgresStore(DataStore):
     def rename_project(self, project_id: str, new_name: str) -> dict[str, Any] | None:
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM projects WHERE id = %s", (project_id,))
-                if not cursor.fetchone():
+                cursor.execute("SELECT id, owner_id FROM projects WHERE id = %s", (project_id,))
+                project = cursor.fetchone()
+                if not project:
                     return None
-                cursor.execute("SELECT id FROM projects WHERE name = %s AND id != %s", (new_name, project_id))
+                owner_id = project["owner_id"]
+                # Check name conflict within same owner scope
+                if owner_id:
+                    cursor.execute("SELECT id FROM projects WHERE name = %s AND owner_id = %s AND id != %s", (new_name, owner_id, project_id))
+                else:
+                    cursor.execute("SELECT id FROM projects WHERE name = %s AND owner_id IS NULL AND id != %s", (new_name, project_id))
                 if cursor.fetchone():
                     raise ValueError(f"Project name '{new_name}' already exists")
                 cursor.execute("UPDATE projects SET name = %s WHERE id = %s", (new_name, project_id))
@@ -244,9 +462,9 @@ class PostgresStore(DataStore):
 
     # ── Session methods ──────────────────────────────────────────────
 
-    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any]) -> str:
+    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any], owner_id: str | None = None) -> str:
         """Create a new training session."""
-        project_id = self.get_or_create_project(project)
+        project_id = self.get_or_create_project(project, owner_id=owner_id)
         session_id = str(uuid.uuid4())
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
@@ -315,13 +533,19 @@ class PostgresStore(DataStore):
                     return dict(row)
         return None
 
-    def get_all_sessions(self) -> list[dict[str, Any]]:
-        """Retrieve all sessions."""
+    def get_all_sessions(self, owner_id: str | None = None) -> list[dict[str, Any]]:
+        """Retrieve all sessions, optionally filtered by owner."""
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    "SELECT s.*, p.name AS project FROM sessions s JOIN projects p ON s.project_id = p.id ORDER BY s.created_at DESC"
-                )
+                if owner_id:
+                    cursor.execute(
+                        "SELECT s.*, p.name AS project FROM sessions s JOIN projects p ON s.project_id = p.id WHERE p.owner_id = %s ORDER BY s.created_at DESC",
+                        (owner_id,),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT s.*, p.name AS project FROM sessions s JOIN projects p ON s.project_id = p.id ORDER BY s.created_at DESC"
+                    )
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
 
@@ -628,15 +852,28 @@ class PostgresStore(DataStore):
                 d["data"] = {"trajectories": trajectories, "metadata": d["metadata"]}
                 return d
 
-    def get_projects(self) -> list[dict[str, Any]]:
+    def get_projects(self, owner_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM projects ORDER BY created_at")
-                project_rows = cursor.fetchall()
+                if owner_id:
+                    cursor.execute("SELECT * FROM projects WHERE owner_id = %s ORDER BY created_at", (owner_id,))
+                    project_rows = cursor.fetchall()
 
-                cursor.execute(
-                    "SELECT id, project_id, experiment, status, created_at, completed_at FROM sessions ORDER BY created_at DESC"
-                )
+                    project_ids = [p["id"] for p in project_rows]
+                    if project_ids:
+                        cursor.execute(
+                            "SELECT id, project_id, experiment, status, created_at, completed_at FROM sessions WHERE project_id = ANY(%s) ORDER BY created_at DESC",
+                            (project_ids,),
+                        )
+                    else:
+                        cursor.execute("SELECT id, project_id, experiment, status, created_at, completed_at FROM sessions WHERE FALSE")
+                else:
+                    cursor.execute("SELECT * FROM projects ORDER BY created_at")
+                    project_rows = cursor.fetchall()
+
+                    cursor.execute(
+                        "SELECT id, project_id, experiment, status, created_at, completed_at FROM sessions ORDER BY created_at DESC"
+                    )
                 session_rows = cursor.fetchall()
 
                 sessions_by_project: dict[str, list] = {}

@@ -10,14 +10,15 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from datastore.factory import get_datastore
 from dotenv import load_dotenv
+
+load_dotenv()
+
+from datastore.factory import get_datastore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from routers import agent, episodes, health, logs, metrics, sessions, sse, trajectory_groups
-
-load_dotenv()
+from routers import agent, auth, episodes, health, logs, metrics, oauth, sessions, settings, sse, trajectory_groups
 
 logger = logging.getLogger(__name__)
 
@@ -104,11 +105,14 @@ app.add_middleware(
 
 # Register routers
 app.include_router(health.router)
+app.include_router(auth.router)
+app.include_router(oauth.router)
 app.include_router(sessions.router)
 app.include_router(metrics.router)
 app.include_router(sse.router)
 app.include_router(episodes.router)
 app.include_router(agent.router)
+app.include_router(settings.router)
 app.include_router(logs.router)
 app.include_router(trajectory_groups.router)
 

@@ -1,14 +1,44 @@
 """Agent router - chat endpoint for the Observability Agent."""
 
 import json
+import logging
 
+from auth import CurrentUser, IS_CLOUD
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from models import ChatSessionCreate, ChatSessionResponse, ChatMessageResponse
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/agent", tags=["agent"])
+
+
+def _resolve_agent(request: Request, user: dict | None):
+    """Return an ObservabilityAgent for this request.
+
+    Priority:
+    1. User's stored Anthropic API key (cloud mode) -> per-request agent
+    2. Global agent from env var (app.state.agent)
+    """
+    if IS_CLOUD and user:
+        try:
+            from encryption import decrypt_value
+
+            store = request.app.state.store
+            settings = store.get_user_settings(user["id"])
+            encrypted_key = settings.get("anthropic_api_key")
+            if encrypted_key:
+                api_key = decrypt_value(encrypted_key)
+                from agent import ObservabilityAgent
+
+                return ObservabilityAgent(datastore=store, api_key=api_key)
+        except Exception as e:
+            logger.debug(f"Could not load user API key: {e}")
+
+    # Fall back to global agent
+    return getattr(request.app.state, "agent", None)
 
 
 class ChatMessage(BaseModel):
@@ -40,7 +70,7 @@ class ChatResponse(BaseModel):
 
 
 @router.get("/sessions", response_model=list[ChatSessionResponse])
-def list_chat_sessions(request: Request, session_id: str):
+def list_chat_sessions(request: Request, session_id: str, user: CurrentUser):
     """List all chat sessions for a training run."""
     store = request.app.state.store
     sessions = store.get_chat_sessions(session_id)
@@ -48,7 +78,7 @@ def list_chat_sessions(request: Request, session_id: str):
 
 
 @router.post("/sessions", response_model=ChatSessionResponse)
-def create_chat_session(request: Request, body: ChatSessionCreate):
+def create_chat_session(request: Request, body: ChatSessionCreate, user: CurrentUser):
     """Create a new chat session for a training run."""
     store = request.app.state.store
     session = store.create_chat_session(body.session_id, body.title)
@@ -56,7 +86,7 @@ def create_chat_session(request: Request, body: ChatSessionCreate):
 
 
 @router.delete("/sessions/{chat_session_id}")
-def delete_chat_session(request: Request, chat_session_id: str):
+def delete_chat_session(request: Request, chat_session_id: str, user: CurrentUser):
     """Delete a chat session and all its messages."""
     store = request.app.state.store
     deleted = store.delete_chat_session(chat_session_id)
@@ -66,7 +96,7 @@ def delete_chat_session(request: Request, chat_session_id: str):
 
 
 @router.get("/sessions/{chat_session_id}/messages", response_model=list[ChatMessageResponse])
-def get_chat_messages(request: Request, chat_session_id: str):
+def get_chat_messages(request: Request, chat_session_id: str, user: CurrentUser):
     """Get all messages for a chat session."""
     store = request.app.state.store
     messages = store.get_chat_messages(chat_session_id)
@@ -77,17 +107,17 @@ def get_chat_messages(request: Request, chat_session_id: str):
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat(request: Request, body: ChatRequest):
+def chat(request: Request, body: ChatRequest, user: CurrentUser):
     """Chat with the observability agent.
 
     Send a natural language message and get insights about your training runs.
     Optionally provide a session_id to focus the conversation on a specific session.
     """
-    agent = getattr(request.app.state, "agent", None)
+    agent = _resolve_agent(request, user)
     if agent is None:
         raise HTTPException(
             status_code=503,
-            detail="Agent not available. Check that ANTHROPIC_API_KEY is configured.",
+            detail="Agent not available. Configure your Anthropic API key in Settings, or set the ANTHROPIC_API_KEY environment variable.",
         )
 
     try:
@@ -107,7 +137,7 @@ def chat(request: Request, body: ChatRequest):
 
 
 @router.post("/chat/stream")
-def chat_stream(request: Request, body: ChatRequest):
+def chat_stream(request: Request, body: ChatRequest, user: CurrentUser):
     """Stream chat responses from the observability agent.
 
     Returns Server-Sent Events (SSE) with the following event types:
@@ -116,11 +146,11 @@ def chat_stream(request: Request, body: ChatRequest):
     - done: {"type": "done", "sources": ["tool1(...)", "tool2(...)"], "chat_session_id": "..."}
     - error: {"type": "error", "message": "error message"}
     """
-    agent = getattr(request.app.state, "agent", None)
+    agent = _resolve_agent(request, user)
     if agent is None:
         raise HTTPException(
             status_code=503,
-            detail="Agent not available. Check that ANTHROPIC_API_KEY is configured.",
+            detail="Agent not available. Configure your Anthropic API key in Settings, or set the ANTHROPIC_API_KEY environment variable.",
         )
 
     store = request.app.state.store

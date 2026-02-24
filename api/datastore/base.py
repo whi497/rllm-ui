@@ -50,8 +50,79 @@ class DataStore(ABC):
         """Reset the data store (destructive, mainly for tests)."""
         pass
 
+    # ── User methods (cloud mode only) ────────────────────────────
+
     @abstractmethod
-    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any]) -> str:
+    def create_user(self, user_id: str, email: str, password_hash: str, name: str | None, api_key: str) -> dict[str, Any]:
+        """Create a new user. Returns the user dict."""
+        pass
+
+    @abstractmethod
+    def get_user_by_email(self, email: str) -> dict[str, Any] | None:
+        """Look up a user by email."""
+        pass
+
+    @abstractmethod
+    def get_user_by_api_key(self, api_key: str) -> dict[str, Any] | None:
+        """Look up a user by API key."""
+        pass
+
+    @abstractmethod
+    def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
+        """Look up a user by ID."""
+        pass
+
+    @abstractmethod
+    def get_user_by_oauth(self, provider: str, provider_id: str) -> dict[str, Any] | None:
+        """Look up a user by OAuth provider and provider user ID."""
+        pass
+
+    @abstractmethod
+    def create_oauth_user(self, user_id: str, email: str, name: str | None, api_key: str,
+                          oauth_provider: str, oauth_provider_id: str) -> dict[str, Any]:
+        """Create a new user from OAuth. Returns the user dict."""
+        pass
+
+    @abstractmethod
+    def link_oauth_to_user(self, user_id: str, oauth_provider: str, oauth_provider_id: str) -> dict[str, Any] | None:
+        """Link an OAuth provider to an existing user. Returns updated user dict."""
+        pass
+
+    @abstractmethod
+    def update_user_api_key(self, user_id: str, new_api_key: str) -> dict[str, Any] | None:
+        """Replace a user's API key. Returns updated user dict or None if not found."""
+        pass
+
+    @abstractmethod
+    def delete_user(self, user_id: str) -> bool:
+        """Delete a user and all associated data (projects, sessions, etc.).
+
+        Relies on ON DELETE CASCADE from projects.owner_id → users.id.
+        Returns True if user existed, False otherwise.
+        """
+        pass
+
+    # ── User settings methods (cloud mode only) ────────────────────
+
+    @abstractmethod
+    def get_user_settings(self, user_id: str) -> dict[str, str]:
+        """Return all settings for a user as {key: value}. Values are stored encrypted."""
+        pass
+
+    @abstractmethod
+    def set_user_setting(self, user_id: str, key: str, value: str) -> None:
+        """Upsert a single setting for a user."""
+        pass
+
+    @abstractmethod
+    def delete_user_setting(self, user_id: str, key: str) -> bool:
+        """Delete a single setting. Returns True if it existed."""
+        pass
+
+    # ── Session / project methods ─────────────────────────────────
+
+    @abstractmethod
+    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any], owner_id: str | None = None) -> str:
         """Create a new training session."""
         pass
 
@@ -71,8 +142,8 @@ class DataStore(ABC):
         pass
 
     @abstractmethod
-    def get_all_sessions(self) -> list[dict[str, Any]]:
-        """Retrieve all sessions."""
+    def get_all_sessions(self, owner_id: str | None = None) -> list[dict[str, Any]]:
+        """Retrieve all sessions, optionally filtered by owner."""
         pass
 
     @abstractmethod
@@ -194,13 +265,13 @@ class DataStore(ABC):
         pass
 
     @abstractmethod
-    def get_projects(self) -> list[dict[str, Any]]:
-        """Retrieve all projects with lightweight session summaries."""
+    def get_projects(self, owner_id: str | None = None) -> list[dict[str, Any]]:
+        """Retrieve all projects with lightweight session summaries, optionally filtered by owner."""
         pass
 
     @abstractmethod
-    def get_or_create_project(self, name: str) -> str:
-        """Get existing project ID by name, or create a new one. Returns project ID."""
+    def get_or_create_project(self, name: str, owner_id: str | None = None) -> str:
+        """Get existing project ID by name (and owner), or create a new one. Returns project ID."""
         pass
 
     @abstractmethod

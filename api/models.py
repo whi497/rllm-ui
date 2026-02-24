@@ -226,3 +226,28 @@ class ChatMessageResponse(BaseModel):
 # Health check
 class HealthResponse(BaseModel):
     status: str
+
+
+# Auth models
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    name: str | None = None
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    name: str | None = None
+    api_key: str | None = None
+
+
+class AuthConfigResponse(BaseModel):
+    auth_required: bool
+    deployment_mode: str
+    oauth_providers: list[str] = []

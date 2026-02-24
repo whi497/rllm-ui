@@ -23,12 +23,12 @@ class AgentResponse:
 class ObservabilityAgent:
     """LLM-powered agent for training observability."""
 
-    def __init__(self, datastore: DataStore, model: str = "claude-sonnet-4-6"):
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
+    def __init__(self, datastore: DataStore, model: str = "claude-sonnet-4-6", api_key: str | None = None):
+        resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not resolved_key:
             raise ValueError("ANTHROPIC_API_KEY environment variable is required")
 
-        self.client = Anthropic(api_key=api_key)
+        self.client = Anthropic(api_key=resolved_key)
         self.datastore = datastore
         self.model = model
         self.tool_executor = ToolExecutor(datastore)

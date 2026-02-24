@@ -1,5 +1,6 @@
 """Sessions router."""
 
+from auth import CurrentUser
 from fastapi import APIRouter, HTTPException, Request
 from models import ProjectRename, ProjectResponse, SessionCreate, SessionFinish, SessionUpdate, SessionResponse
 
@@ -7,29 +8,36 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
 @router.post("", response_model=SessionResponse)
-def create_session(request: Request, session: SessionCreate):
+def create_session(request: Request, session: SessionCreate, user: CurrentUser):
     """Create a new training session."""
     store = request.app.state.store
-    session_id = store.create_session(project=session.project, experiment=session.experiment, config=session.config, source_metadata=session.source_metadata)
+    owner_id = user["id"] if user else None
+    session_id = store.create_session(
+        project=session.project, experiment=session.experiment,
+        config=session.config, source_metadata=session.source_metadata,
+        owner_id=owner_id,
+    )
     return store.get_session(session_id)
 
 
 @router.get("", response_model=list[SessionResponse])
-def list_sessions(request: Request):
+def list_sessions(request: Request, user: CurrentUser):
     """List all sessions."""
     store = request.app.state.store
-    return store.get_all_sessions()
+    owner_id = user["id"] if user else None
+    return store.get_all_sessions(owner_id=owner_id)
 
 
 @router.get("/projects", response_model=list[ProjectResponse])
-def list_projects(request: Request):
+def list_projects(request: Request, user: CurrentUser):
     """List all projects with their sessions."""
     store = request.app.state.store
-    return store.get_projects()
+    owner_id = user["id"] if user else None
+    return store.get_projects(owner_id=owner_id)
 
 
 @router.patch("/projects/{project_id}")
-def rename_project(request: Request, project_id: str, body: ProjectRename):
+def rename_project(request: Request, project_id: str, body: ProjectRename, user: CurrentUser):
     """Rename a project."""
     store = request.app.state.store
     if not body.new_name or not body.new_name.strip():
@@ -44,7 +52,7 @@ def rename_project(request: Request, project_id: str, body: ProjectRename):
 
 
 @router.delete("/projects/{project_id}")
-def delete_project(request: Request, project_id: str):
+def delete_project(request: Request, project_id: str, user: CurrentUser):
     """Delete a project and all its sessions."""
     store = request.app.state.store
     deleted = store.delete_project(project_id)
@@ -54,7 +62,7 @@ def delete_project(request: Request, project_id: str):
 
 
 @router.patch("/{session_id}")
-def update_session(request: Request, session_id: str, body: SessionUpdate):
+def update_session(request: Request, session_id: str, body: SessionUpdate, user: CurrentUser):
     """Update a session's experiment name and/or color."""
     store = request.app.state.store
     experiment = None
@@ -71,7 +79,7 @@ def update_session(request: Request, session_id: str, body: SessionUpdate):
 
 
 @router.delete("/{session_id}")
-def delete_session(request: Request, session_id: str):
+def delete_session(request: Request, session_id: str, user: CurrentUser):
     """Delete a session and all its children."""
     store = request.app.state.store
     deleted = store.delete_session(session_id)
@@ -81,7 +89,7 @@ def delete_session(request: Request, session_id: str):
 
 
 @router.get("/{session_id}", response_model=SessionResponse)
-def get_session(request: Request, session_id: str):
+def get_session(request: Request, session_id: str, user: CurrentUser):
     """Get a specific session by ID."""
     store = request.app.state.store
     session = store.get_session(session_id)
@@ -91,7 +99,7 @@ def get_session(request: Request, session_id: str):
 
 
 @router.post("/{session_id}/complete", response_model=SessionResponse)
-def complete_session(request: Request, session_id: str, body: SessionFinish | None = None):
+def complete_session(request: Request, session_id: str, user: CurrentUser, body: SessionFinish | None = None):
     """Mark a session as completed or failed."""
     store = request.app.state.store
     status = body.status if body else "completed"
@@ -104,7 +112,7 @@ def complete_session(request: Request, session_id: str, body: SessionFinish | No
 
 
 @router.post("/{session_id}/heartbeat")
-def heartbeat_session(request: Request, session_id: str):
+def heartbeat_session(request: Request, session_id: str, user: CurrentUser):
     """Update the heartbeat timestamp for a session."""
     store = request.app.state.store
     found = store.heartbeat_session(session_id)

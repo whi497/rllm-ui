@@ -30,8 +30,10 @@ class SQLiteStore(DataStore):
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS projects (
                     id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL UNIQUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    name TEXT NOT NULL,
+                    owner_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(name, owner_id)
                 )
             """)
 
@@ -136,15 +138,59 @@ class SQLiteStore(DataStore):
             self.db_path.unlink()
         self.init_db()
 
+    # ── User methods (cloud-only — not supported in local/SQLite mode) ──
+
+    def create_user(self, user_id: str, email: str, password_hash: str, name: str | None, api_key: str) -> dict[str, Any]:
+        raise NotImplementedError("User management requires cloud mode (PostgreSQL)")
+
+    def get_user_by_email(self, email: str) -> dict[str, Any] | None:
+        return None
+
+    def get_user_by_api_key(self, api_key: str) -> dict[str, Any] | None:
+        return None
+
+    def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
+        return None
+
+    def get_user_by_oauth(self, provider: str, provider_id: str) -> dict[str, Any] | None:
+        return None
+
+    def create_oauth_user(self, user_id: str, email: str, name: str | None, api_key: str,
+                          oauth_provider: str, oauth_provider_id: str) -> dict[str, Any]:
+        raise NotImplementedError("User management requires cloud mode (PostgreSQL)")
+
+    def link_oauth_to_user(self, user_id: str, oauth_provider: str, oauth_provider_id: str) -> dict[str, Any] | None:
+        raise NotImplementedError("User management requires cloud mode (PostgreSQL)")
+
+    def update_user_api_key(self, user_id: str, new_api_key: str) -> dict[str, Any] | None:
+        return None
+
+    def delete_user(self, user_id: str) -> bool:
+        return False
+
+    # ── User settings methods (cloud-only — not supported in local/SQLite mode) ──
+
+    def get_user_settings(self, user_id: str) -> dict[str, str]:
+        raise NotImplementedError("User settings require cloud mode (PostgreSQL)")
+
+    def set_user_setting(self, user_id: str, key: str, value: str) -> None:
+        raise NotImplementedError("User settings require cloud mode (PostgreSQL)")
+
+    def delete_user_setting(self, user_id: str, key: str) -> bool:
+        raise NotImplementedError("User settings require cloud mode (PostgreSQL)")
+
     # ── Project methods ──────────────────────────────────────────────
 
-    def get_or_create_project(self, name: str) -> str:
+    def get_or_create_project(self, name: str, owner_id: str | None = None) -> str:
         with self._get_conn() as conn:
-            row = conn.execute("SELECT id FROM projects WHERE name = ?", (name,)).fetchone()
+            if owner_id:
+                row = conn.execute("SELECT id FROM projects WHERE name = ? AND owner_id = ?", (name, owner_id)).fetchone()
+            else:
+                row = conn.execute("SELECT id FROM projects WHERE name = ?", (name,)).fetchone()
             if row:
                 return row["id"]
             project_id = str(uuid.uuid4())
-            conn.execute("INSERT INTO projects (id, name) VALUES (?, ?)", (project_id, name))
+            conn.execute("INSERT INTO projects (id, name, owner_id) VALUES (?, ?, ?)", (project_id, name, owner_id))
             conn.commit()
             return project_id
 
@@ -200,8 +246,8 @@ class SQLiteStore(DataStore):
 
     # ── Session methods ──────────────────────────────────────────────
 
-    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any]) -> str:
-        project_id = self.get_or_create_project(project)
+    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any], owner_id: str | None = None) -> str:
+        project_id = self.get_or_create_project(project, owner_id=owner_id)
         session_id = str(uuid.uuid4())
         with self._get_conn() as conn:
             conn.execute(
@@ -261,11 +307,17 @@ class SQLiteStore(DataStore):
                 return d
         return None
 
-    def get_all_sessions(self) -> list[dict[str, Any]]:
+    def get_all_sessions(self, owner_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT s.*, p.name AS project FROM sessions s JOIN projects p ON s.project_id = p.id ORDER BY s.created_at DESC"
-            ).fetchall()
+            if owner_id:
+                rows = conn.execute(
+                    "SELECT s.*, p.name AS project FROM sessions s JOIN projects p ON s.project_id = p.id WHERE p.owner_id = ? ORDER BY s.created_at DESC",
+                    (owner_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT s.*, p.name AS project FROM sessions s JOIN projects p ON s.project_id = p.id ORDER BY s.created_at DESC"
+                ).fetchall()
             results = []
             for row in rows:
                 d = dict(row)
@@ -568,10 +620,13 @@ class SQLiteStore(DataStore):
             d["data"] = {"trajectories": trajectories, "metadata": d["metadata"]}
             return d
 
-    def get_projects(self) -> list[dict[str, Any]]:
+    def get_projects(self, owner_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
-            # Get all projects
-            project_rows = conn.execute("SELECT * FROM projects ORDER BY created_at").fetchall()
+            # Get projects, filtered by owner if provided
+            if owner_id:
+                project_rows = conn.execute("SELECT * FROM projects WHERE owner_id = ? ORDER BY created_at", (owner_id,)).fetchall()
+            else:
+                project_rows = conn.execute("SELECT * FROM projects ORDER BY created_at").fetchall()
             # Get all sessions with project info
             session_rows = conn.execute(
                 "SELECT s.id, s.project_id, s.experiment, s.status, s.created_at, s.completed_at FROM sessions s ORDER BY s.created_at DESC"
