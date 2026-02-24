@@ -1,13 +1,9 @@
 """Settings router — per-user key-value settings (cloud mode only)."""
 
-import logging
-
 from auth import CurrentUser, IS_CLOUD
 from encryption import encrypt_value, decrypt_value
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 

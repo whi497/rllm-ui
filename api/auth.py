@@ -12,7 +12,7 @@ from typing import Annotated
 
 import bcrypt
 import jwt
-from fastapi import Cookie, Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 # ── Config constants ──────────────────────────────────────────────
 

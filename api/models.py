@@ -191,15 +191,6 @@ class LogBatchCreate(BaseModel):
     logs: list[LogCreate]
 
 
-class LogResponse(BaseModel):
-    id: int
-    session_id: str
-    timestamp: str
-    stream: str
-    message: str
-    created_at: datetime
-
-
 # Chat session models
 class ChatSessionCreate(BaseModel):
     session_id: str
@@ -221,11 +212,6 @@ class ChatMessageResponse(BaseModel):
     role: str
     content: str
     created_at: datetime
-
-
-# Health check
-class HealthResponse(BaseModel):
-    status: str
 
 
 # Auth models

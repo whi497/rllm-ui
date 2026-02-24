@@ -8,22 +8,6 @@ interface MetricSelectorModalProps {
   onSelectionChange: (metric: string | null) => void;
 }
 
-// Color palette for metrics
-const METRIC_COLORS = [
-  "#345f94", // blue
-  "#dc2626", // red
-  "#16a34a", // green
-  "#9333ea", // purple
-  "#ea580c", // orange
-  "#0891b2", // cyan
-  "#c026d3", // fuchsia
-  "#65a30d", // lime
-];
-
-export function getMetricColor(index: number): string {
-  return METRIC_COLORS[index % METRIC_COLORS.length];
-}
-
 /**
  * Groups metrics by their first path segment
  * e.g., "reward/mean" -> "reward", "advantage/judge/fraction_zero" -> "advantage"

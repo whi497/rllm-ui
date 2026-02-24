@@ -9,8 +9,6 @@ interface WelcomeModalProps {
   subtitle?: string;
   /** Label on the primary button. Defaults to "Get Started" for registration. */
   buttonLabel?: string;
-  /** Icon variant shown in the header circle. */
-  icon?: "key" | "refresh";
 }
 
 export const WelcomeModal: React.FC<WelcomeModalProps> = ({

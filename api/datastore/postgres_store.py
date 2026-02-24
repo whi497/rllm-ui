@@ -17,7 +17,6 @@ class PostgresStore(DataStore):
 
     def __init__(self, url: str):
         self.url = url
-        self._conn = None
 
     @contextmanager
     def _get_conn(self):
