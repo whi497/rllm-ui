@@ -211,7 +211,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   if (availableMetrics.length === 0) {
     return (
       <EmptyState
-        icon={<BarChartIcon sx={{ fontSize: 24 }} className="text-gray-400" />}
+        icon={<BarChartIcon size={24} className="text-gray-400" />}
         title={isConnected ? "Waiting for metrics" : "Connecting"}
         className="flex-1 h-full"
       />
@@ -268,7 +268,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       <div className="flex-1 overflow-y-auto">
         {filteredGroupKeys.length === 0 ? (
           <EmptyState
-            icon={<SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />}
+            icon={<SearchIcon size={24} className="text-gray-400" />}
             title="No matching metrics"
             className="h-32"
           />

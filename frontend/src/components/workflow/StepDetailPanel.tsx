@@ -22,7 +22,7 @@ export const StepDetailPanel: React.FC<StepDetailPanelProps> = ({ step, onClose 
           onClick={onClose}
           className="mb-4 flex items-center gap-2 text-gray-600 hover:text-black transition-colors"
         >
-          <ChevronLeftIcon sx={{ fontSize: 20 }} />
+          <ChevronLeftIcon size={20} />
           <span className="text-sm">Back</span>
         </button>
 

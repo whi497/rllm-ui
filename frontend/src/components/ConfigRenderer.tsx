@@ -236,7 +236,7 @@ export const ConfigRenderer: React.FC<ConfigRendererProps> = ({
       return (
         <EmptyState
           icon={
-            <SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />
+            <SearchIcon size={24} className="text-gray-400" />
           }
           title="No matching fields"
           className="py-12 px-4"

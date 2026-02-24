@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { MoreVertIcon, DeleteIcon } from "./icons";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { API_BASE_URL } from "../config/api";
+import { apiFetch } from "../config/api";
 
 interface ChatSession {
   id: string;
@@ -50,8 +50,8 @@ export const ChatSessionMenu: React.FC<ChatSessionMenuProps> = ({
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch(
-        `${API_BASE_URL}/api/agent/sessions?session_id=${sessionId}`
+      const res = await apiFetch(
+        `/api/agent/sessions?session_id=${sessionId}`
       );
       if (res.ok) {
         setSessions(await res.json());
@@ -123,7 +123,7 @@ export const ChatSessionMenu: React.FC<ChatSessionMenuProps> = ({
         className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-layer-2 transition-colors"
         title="Chat sessions"
       >
-        <MoreVertIcon sx={{ fontSize: 18 }} />
+        <MoreVertIcon size={18} />
       </button>
 
       {open && createPortal(
@@ -178,7 +178,7 @@ export const ChatSessionMenu: React.FC<ChatSessionMenuProps> = ({
                     className="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
                     title="Delete chat"
                   >
-                    <DeleteIcon sx={{ fontSize: 14 }} />
+                    <DeleteIcon size={14} />
                   </button>
                 </div>
               ))

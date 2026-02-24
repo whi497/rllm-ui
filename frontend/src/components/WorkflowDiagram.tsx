@@ -301,7 +301,7 @@ export const WorkflowDiagram: React.FC<WorkflowDiagramProps> = ({ session, expan
             className="w-full pl-8 pr-8 py-1.5 bg-white border border-gray-200 rounded-md text-sm placeholder-gray-400 focus:outline-none focus:border-gray-400"
           />
           <SearchIcon
-            sx={{ fontSize: 16 }}
+            size={16}
             className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
           />
           {searchQuery && (
@@ -340,7 +340,7 @@ export const WorkflowDiagram: React.FC<WorkflowDiagramProps> = ({ session, expan
       <div className="flex-1 overflow-y-auto">
         {isSearchActive && matchingSectionKeys.size === 0 ? (
           <EmptyState
-            icon={<SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />}
+            icon={<SearchIcon size={24} className="text-gray-400" />}
             title="No matches found"
             className="py-12 px-4"
           />

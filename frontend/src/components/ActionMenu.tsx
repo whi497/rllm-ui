@@ -67,7 +67,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
         className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-layer-2 transition-colors"
         title="Actions"
       >
-        <MoreVertIcon sx={{ fontSize: 18 }} />
+        <MoreVertIcon size={18} />
       </button>
 
       {/* Entire dropdown rendered as portal to escape overflow clipping */}
@@ -87,7 +87,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
               }}
               className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-layer-1 transition-colors"
             >
-              <PushPinIcon sx={{ fontSize: 16 }} />
+              <PushPinIcon size={16} />
               {isPinned ? "Unpin" : "Pin"}
             </button>
           )}
@@ -100,7 +100,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
             }}
             className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-layer-1 transition-colors"
           >
-            <EditIcon sx={{ fontSize: 16 }} />
+            <EditIcon size={16} />
             Rename
           </button>
           {onChangeColor && (
@@ -112,7 +112,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
               <button
                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors ${showColors ? "text-accent-700 bg-accent-50" : "text-gray-700 hover:bg-layer-1"}`}
               >
-                <PaletteIcon sx={{ fontSize: 16 }} />
+                <PaletteIcon size={16} />
                 Change color
               </button>
               {showColors && (
@@ -149,7 +149,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
             }}
             className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
           >
-            <DeleteIcon sx={{ fontSize: 16 }} />
+            <DeleteIcon size={16} />
             Delete
           </button>
         </div>,

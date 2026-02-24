@@ -1,58 +1,64 @@
-// Re-export Material Icons for consistent usage across the app
+// Re-export Lucide icons for consistent usage across the app
 export {
-  SmartToy as SmartToyIcon,
-  TrackChanges as TrackChangesIcon,
+  Bot as SmartToyIcon,
+  Target as TrackChangesIcon,
   Search as SearchIcon,
-  Warning as WarningIcon,
-  BarChart as BarChartIcon,
-  Timeline as TimelineIcon,
-  FilterList as FilterListIcon,
-  Assignment as AssignmentIcon,
-  HourglassEmpty as HourglassEmptyIcon,
+  TriangleAlert as WarningIcon,
+  BarChart3 as BarChartIcon,
+  Activity as TimelineIcon,
+  ListFilter as FilterListIcon,
+  ClipboardList as AssignmentIcon,
+  Hourglass as HourglassEmptyIcon,
   Cable as CableIcon,
   Info as InfoIcon,
-  Tune as TuneIcon,
+  SlidersHorizontal as TuneIcon,
   Settings as SettingsIcon,
   // Sidebar collapse/expand icons (double arrows like <| and |>)
-  KeyboardDoubleArrowLeft as SidebarCollapseIcon,
-  KeyboardDoubleArrowRight as SidebarExpandIcon,
+  ChevronsLeft as SidebarCollapseIcon,
+  ChevronsRight as SidebarExpandIcon,
   // General chevrons for expand/collapse (episodes, lists, etc.)
   ChevronRight as ChevronRightIcon,
-  ExpandMore as ChevronDownIcon,
-  ExpandLess as ChevronUpIcon,
+  ChevronDown as ChevronDownIcon,
+  ChevronUp as ChevronUpIcon,
   // Legacy aliases - keep for compatibility
-  KeyboardDoubleArrowLeft as ChevronLeftIcon,
+  ChevronsLeft as ChevronLeftIcon,
   // Workflow diagram icon
-  AccountTree as AccountTreeIcon,
+  Workflow as AccountTreeIcon,
   // Search result icons
-  CheckCircleOutline,
-  CancelOutlined,
+  CircleCheck as CheckCircleOutline,
+  CircleX as CancelOutlined,
   // Chat icon for assistant
-  Chat as ChatIcon,
+  MessageSquare as ChatIcon,
   // Terminal icon for logs
   Terminal as TerminalIcon,
   // Folder icon for project sidebar
-  FolderOpen as FolderOpenIcon,
+  Folder as FolderOpenIcon,
   // Dashboard icon for projects overview
-  Dashboard as DashboardIcon,
+  LayoutDashboard as DashboardIcon,
   // Science icon for experiments
-  Science as ScienceIcon,
+  FlaskConical as ScienceIcon,
   // Visibility icons for experiment eye toggles
-  Visibility as VisibilityIcon,
-  VisibilityOff as VisibilityOffIcon,
+  Eye as VisibilityIcon,
+  EyeOff as VisibilityOffIcon,
   // Back arrow
-  ArrowBack as ArrowBackIcon,
+  ArrowLeft as ArrowBackIcon,
   // Action menu icons
-  MoreVert as MoreVertIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
+  EllipsisVertical as MoreVertIcon,
+  Pencil as EditIcon,
+  Trash2 as DeleteIcon,
   // Color picker icon
   Palette as PaletteIcon,
   // Pin icon for experiment pinning
-  PushPin as PushPinIcon,
+  Pin as PushPinIcon,
   // Sort icon for episode sorting
-  Sort as SortIcon,
+  ArrowUpDown as SortIcon,
   // Check and X icons (no circle)
   Check as CheckIcon,
-  Close as CloseIcon,
-} from "@mui/icons-material";
+  X as CloseIcon,
+  // Settings page section icons
+  User as PersonIcon,
+  KeyRound as VpnKeyIcon,
+  // Docs link icons
+  BookOpen as MenuBookIcon,
+  ArrowUpRight as NorthEastIcon,
+} from "lucide-react";

@@ -14,7 +14,7 @@ import { Spinner, EmptyState, ThreeDotMenu, CollapsibleSection } from "./ui";
 import { getExperimentColor } from "../utils/experimentColors";
 import { useExperimentVisibility } from "../contexts/ExperimentVisibilityContext";
 import type { Metric } from "../hooks/useSSE";
-import { API_BASE_URL } from "../config/api";
+import { API_BASE_URL, apiFetch } from "../config/api";
 
 interface Session {
   id: string;
@@ -72,7 +72,7 @@ export const ProjectOverview: React.FC = () => {
   const fetchSessions = useCallback(async () => {
     if (!projectId) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/sessions`);
+      const res = await apiFetch("/api/sessions");
       if (!res.ok) return;
       const data: Session[] = await res.json();
       const projectSessions = data.filter(
@@ -99,8 +99,8 @@ export const ProjectOverview: React.FC = () => {
 
     sessions.forEach(async (session) => {
       try {
-        const res = await fetch(
-          `${apiUrl}/api/sessions/${session.id}/metrics`
+        const res = await apiFetch(
+          `/api/sessions/${session.id}/metrics`
         );
         if (!res.ok) return;
         const metrics: Metric[] = await res.json();
@@ -314,13 +314,13 @@ export const ProjectOverview: React.FC = () => {
       <div className="flex-1 overflow-y-auto">
         {allMetricKeys.length === 0 ? (
           <EmptyState
-            icon={<BarChartIcon sx={{ fontSize: 24 }} className="text-gray-400" />}
+            icon={<BarChartIcon size={24} className="text-gray-400" />}
             title="Waiting for metrics"
             className="h-64"
           />
         ) : filteredGroupKeys.length === 0 ? (
           <EmptyState
-            icon={<SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />}
+            icon={<SearchIcon size={24} className="text-gray-400" />}
             title="No matching metrics"
             className="h-32"
           />

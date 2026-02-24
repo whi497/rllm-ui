@@ -39,7 +39,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
           className="w-full pl-7 pr-7 py-1.5 bg-white border border-gray-200 rounded-md text-sm placeholder-gray-400 focus:outline-none focus:border-gray-400"
         />
         <SearchIcon
-          sx={{ fontSize: 14 }}
+          size={14}
           className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"
         />
         {showClear && (

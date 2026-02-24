@@ -16,7 +16,7 @@ import {
 import { Spinner, EmptyState, CollapsibleSection, useClickOutside, ThreeDotMenu } from "./ui";
 import { HighlightedText, textContains } from "./HighlightedText";
 import SearchBar from "./SearchBar";
-import { API_BASE_URL } from "../config/api";
+import { apiFetch } from "../config/api";
 
 interface TrajectoryStep {
   observation?: any;
@@ -122,7 +122,7 @@ const searchEpisodesAPI = async (
   if (step !== null && step !== undefined) {
     params.set("step", String(step));
   }
-  const response = await fetch(`${API_BASE_URL}/api/episodes/search?${params}`);
+  const response = await apiFetch(`/api/episodes/search?${params}`);
   if (!response.ok) {
     throw new Error(`Search failed: ${response.status}`);
   }
@@ -137,8 +137,8 @@ const fetchTrajectoryGroupsAPI = async (
   if (step !== null && step !== undefined) {
     params.set("step", String(step));
   }
-  const response = await fetch(
-    `${API_BASE_URL}/api/trajectory-groups?${params}`,
+  const response = await apiFetch(
+    `/api/trajectory-groups?${params}`,
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch trajectory groups: ${response.status}`);
@@ -164,8 +164,8 @@ const searchTrajectoryGroupsAPI = async (
   if (step !== null && step !== undefined) {
     params.set("step", String(step));
   }
-  const response = await fetch(
-    `${API_BASE_URL}/api/trajectory-groups/search?${params}`,
+  const response = await apiFetch(
+    `/api/trajectory-groups/search?${params}`,
   );
   if (!response.ok) {
     throw new Error(`Search failed: ${response.status}`);
@@ -181,8 +181,8 @@ const fetchTrajectoryGroupAPI = async (
   const params = new URLSearchParams({
     include_trajectories: String(includeTrajectories),
   });
-  const response = await fetch(
-    `${API_BASE_URL}/api/trajectory-groups/${groupId}?${params}`,
+  const response = await apiFetch(
+    `/api/trajectory-groups/${groupId}?${params}`,
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch trajectory group: ${response.status}`);
@@ -970,7 +970,7 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
                 />
               ) : displayGroups.length === 0 && groupCommittedQuery.trim() ? (
                 <EmptyState
-                  icon={<SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />}
+                  icon={<SearchIcon size={24} className="text-gray-400" />}
                   title="No matches found"
                   className="py-12 px-4"
                 />
@@ -1090,7 +1090,7 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
               </div>
             ) : displayEpisodes.length === 0 && committedQuery.trim() ? (
               <EmptyState
-                icon={<SearchIcon sx={{ fontSize: 24 }} className="text-gray-400" />}
+                icon={<SearchIcon size={24} className="text-gray-400" />}
                 title="No matches found"
                 className="py-12 px-4"
               />
@@ -1154,9 +1154,9 @@ const EpisodeCard: React.FC<EpisodeCardProps> = ({
       >
         <div className="shrink-0">
           {isExpanded ? (
-            <ChevronDownIcon sx={{ fontSize: 16 }} className="text-gray-400" />
+            <ChevronDownIcon size={16} className="text-gray-400" />
           ) : (
-            <ChevronRightIcon sx={{ fontSize: 16 }} className="text-gray-400" />
+            <ChevronRightIcon size={16} className="text-gray-400" />
           )}
         </div>
 
@@ -1170,9 +1170,9 @@ const EpisodeCard: React.FC<EpisodeCardProps> = ({
               }`}
             >
               {episode.is_correct ? (
-                <CheckIcon sx={{ fontSize: 14 }} />
+                <CheckIcon size={14} />
               ) : (
-                <CloseIcon sx={{ fontSize: 14 }} />
+                <CloseIcon size={14} />
               )}
             </span>
             <span className="text-sm text-gray-700">Rollout {rolloutIndex}</span>
@@ -1411,9 +1411,9 @@ const TrajectoryCard: React.FC<TrajectoryCardProps> = ({
         className="w-full px-3 py-2 flex items-center gap-2 hover:bg-layer-1 transition-colors text-left"
       >
         {isExpanded ? (
-          <ChevronDownIcon sx={{ fontSize: 14 }} className="text-gray-400" />
+          <ChevronDownIcon size={14} className="text-gray-400" />
         ) : (
-          <ChevronRightIcon sx={{ fontSize: 14 }} className="text-gray-400" />
+          <ChevronRightIcon size={14} className="text-gray-400" />
         )}
         <span className="text-sm font-medium text-gray-700 capitalize">
           {trajectory.name || `Trajectory ${index + 1}`}
@@ -1604,9 +1604,9 @@ const TrajectoryGroupCard: React.FC<TrajectoryGroupCardProps> = ({
       >
         <div className="shrink-0">
           {isExpanded ? (
-            <ChevronDownIcon sx={{ fontSize: 16 }} className="text-gray-400" />
+            <ChevronDownIcon size={16} className="text-gray-400" />
           ) : (
-            <ChevronRightIcon sx={{ fontSize: 16 }} className="text-gray-400" />
+            <ChevronRightIcon size={16} className="text-gray-400" />
           )}
         </div>
 
@@ -1617,7 +1617,7 @@ const TrajectoryGroupCard: React.FC<TrajectoryGroupCardProps> = ({
             </span>
             {group.avg_reward !== null && group.avg_reward === 0 && (
               <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-red-100 text-red-700">
-                <CloseIcon sx={{ fontSize: 14 }} />
+                <CloseIcon size={14} />
               </span>
             )}
             {group.avg_reward !== null && (
@@ -1718,9 +1718,9 @@ const GroupTrajectoryCard: React.FC<GroupTrajectoryCardProps> = ({
         className="w-full px-3 py-2 flex items-center gap-2 hover:bg-layer-1 transition-colors text-left"
       >
         {isExpanded ? (
-          <ChevronDownIcon sx={{ fontSize: 14 }} className="text-gray-400" />
+          <ChevronDownIcon size={14} className="text-gray-400" />
         ) : (
-          <ChevronRightIcon sx={{ fontSize: 14 }} className="text-gray-400" />
+          <ChevronRightIcon size={14} className="text-gray-400" />
         )}
         <span className="text-sm font-medium text-gray-700">
           Trajectory {trajectoryIndex !== undefined ? trajectoryIndex : index}
@@ -1730,7 +1730,7 @@ const GroupTrajectoryCard: React.FC<GroupTrajectoryCardProps> = ({
         </span>
         {(trajectory.reward ?? 0) === 0 && (
           <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-red-100 text-red-700 ml-auto">
-            <CloseIcon sx={{ fontSize: 14 }} />
+            <CloseIcon size={14} />
           </span>
         )}
         <span className={`text-sm text-gray-500 ${(trajectory.reward ?? 0) !== 0 ? "ml-auto" : ""}`}>
@@ -1860,7 +1860,7 @@ const SortMenu: React.FC<{
       }`}
       title="Sort"
     >
-      <SortIcon sx={{ fontSize: 16 }} />
+      <SortIcon size={16} />
     </button>
     {isOpen && (
       <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 w-52">

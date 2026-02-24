@@ -29,9 +29,9 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
     >
       <div className="flex items-center gap-2">
         {isExpanded ? (
-          <ChevronDownIcon sx={{ fontSize: 16 }} className="text-gray-400" />
+          <ChevronDownIcon size={16} className="text-gray-400" />
         ) : (
-          <ChevronRightIcon sx={{ fontSize: 16 }} className="text-gray-400" />
+          <ChevronRightIcon size={16} className="text-gray-400" />
         )}
         {title}
       </div>

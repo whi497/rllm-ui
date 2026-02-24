@@ -19,6 +19,7 @@
     "@types/prismjs": "^1.26.6",
     "@xyflow/react": "^12.10.0",
     "ansi-to-react": "^6.2.6",
+    "lucide-react": "^0.575.0",
     "playwright": "^1.58.0",
     "prismjs": "^1.30.0",
     "react": "^18.3.1",

@@ -22,7 +22,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   <Modal open={open} onClose={onCancel}>
     <div className="flex items-start gap-3 mb-4">
       <div className="flex-shrink-0 w-10 h-10 bg-red-50 rounded-full flex items-center justify-center">
-        <WarningIcon sx={{ fontSize: 20 }} className="text-red-500" />
+        <WarningIcon size={20} className="text-red-500" />
       </div>
       <div>
         <h3 className="text-sm font-semibold text-gray-900">{title}</h3>

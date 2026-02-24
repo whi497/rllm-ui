@@ -19,7 +19,7 @@ import { ConfigRenderer } from "./ConfigRenderer";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { getExperimentColor } from "../utils/experimentColors";
 import { useExperimentVisibility } from "../contexts/ExperimentVisibilityContext";
-import { API_BASE_URL } from "../config/api";
+import { API_BASE_URL, apiFetch } from "../config/api";
 import { Spinner, EmptyState } from "./ui";
 
 type SessionStatus = "running" | "completed" | "failed" | "crashed";
@@ -186,7 +186,7 @@ export const TrainingRunDetail: React.FC = () => {
       fetchSessionDetails();
       fetchEpisodes();
       // Load most recent chat session
-      fetch(`${API_BASE_URL}/api/agent/sessions?session_id=${sessionId}`)
+      apiFetch(`/api/agent/sessions?session_id=${sessionId}`)
         .then((r) => r.ok ? r.json() : [])
         .then((sessions: { id: string }[]) => {
           if (sessions.length > 0) {
@@ -243,8 +243,8 @@ export const TrainingRunDetail: React.FC = () => {
 
   const fetchSessionDetails = async () => {
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/sessions/${sessionId}`
+      const response = await apiFetch(
+        `/api/sessions/${sessionId}`
       );
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -260,8 +260,8 @@ export const TrainingRunDetail: React.FC = () => {
 
   const fetchEpisodes = async () => {
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/episodes?session_id=${sessionId}`
+      const response = await apiFetch(
+        `/api/episodes?session_id=${sessionId}`
       );
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -284,7 +284,7 @@ export const TrainingRunDetail: React.FC = () => {
     const trimmed = renameValue.trim();
     if (!trimmed || !sessionId) { setIsRenaming(false); renamingRef.current = false; return; }
     try {
-      const res = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
+      const res = await apiFetch(`/api/sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ new_experiment_name: trimmed }),
@@ -301,7 +301,7 @@ export const TrainingRunDetail: React.FC = () => {
   const handleDeleteSession = async () => {
     if (!sessionId || !session) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
+      const res = await apiFetch(`/api/sessions/${sessionId}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -335,7 +335,7 @@ export const TrainingRunDetail: React.FC = () => {
         <div className="max-w-2xl mx-auto">
           <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
             <div className="flex items-start gap-3">
-              <WarningIcon sx={{ fontSize: 20 }} className="text-red-500" />
+              <WarningIcon size={20} className="text-red-500" />
               <div className="flex-1">
                 <h3 className="text-sm font-semibold text-gray-900 mb-1">
                   Error Loading Session
@@ -368,7 +368,7 @@ export const TrainingRunDetail: React.FC = () => {
               className="p-1 hover:bg-layer-2 text-gray-400 hover:text-gray-700 rounded-md transition-colors"
               title="Back to project overview"
             >
-              <ArrowBackIcon sx={{ fontSize: 20 }} />
+              <ArrowBackIcon size={20} />
             </button>
             {experimentColor && (
               <span
@@ -634,7 +634,7 @@ export const TrainingRunDetail: React.FC = () => {
                     onSelect={(id) => setActiveChatSessionId(id)}
                     onNew={async () => {
                       try {
-                        const res = await fetch(`${API_BASE_URL}/api/agent/sessions`, {
+                        const res = await apiFetch("/api/agent/sessions", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ session_id: sessionId }),
@@ -647,10 +647,10 @@ export const TrainingRunDetail: React.FC = () => {
                     }}
                     onDelete={async (id) => {
                       try {
-                        await fetch(`${API_BASE_URL}/api/agent/sessions/${id}`, { method: "DELETE" });
+                        await apiFetch(`/api/agent/sessions/${id}`, { method: "DELETE" });
                         if (id === activeChatSessionId) {
                           // Switch to another session or clear
-                          const res = await fetch(`${API_BASE_URL}/api/agent/sessions?session_id=${sessionId}`);
+                          const res = await apiFetch(`/api/agent/sessions?session_id=${sessionId}`);
                           const sessions = res.ok ? await res.json() : [];
                           setActiveChatSessionId(sessions.length > 0 ? sessions[0].id : null);
                         }
@@ -685,7 +685,7 @@ export const TrainingRunDetail: React.FC = () => {
                       className="w-full pl-8 pr-8 py-1.5 bg-white border border-gray-200 rounded-md text-sm placeholder-gray-400 focus:outline-none focus:border-gray-400"
                     />
                     <SearchIcon
-                      sx={{ fontSize: 16 }}
+                      size={16}
                       className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
                     />
                     {metaSearchQuery && (

@@ -19,7 +19,7 @@ export const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({ actions }) => {
         className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-layer-2 transition-colors"
         title="Options"
       >
-        <MoreVertIcon sx={{ fontSize: 18 }} />
+        <MoreVertIcon size={18} />
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 w-36">
