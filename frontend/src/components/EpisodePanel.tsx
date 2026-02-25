@@ -1359,6 +1359,20 @@ const TaskGroupBatchCard: React.FC<TaskGroupBatchCardProps> = ({
       }
       contentClassName="pl-3 border-l-2 border-gray-200 ml-2"
     >
+      {taskText && (
+        <div className="mt-2 mx-4 p-3 bg-white rounded-lg border border-gray-200">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+            Task
+          </p>
+          <p className="text-sm text-gray-900">
+            <HighlightedText
+              text={taskText}
+              searchQuery={searchQuery}
+              searchTerms={searchTerms}
+            />
+          </p>
+        </div>
+      )}
       {batch.groups.map((group) => (
         <TrajectoryGroupCard
           key={group.id}
@@ -1372,7 +1386,6 @@ const TaskGroupBatchCard: React.FC<TaskGroupBatchCardProps> = ({
           currentGroupMatch={currentGroupMatch}
           currentGroupMatchRef={currentGroupMatchRef}
           preloadedData={preloadedGroupData?.get(group.id)}
-          taskText={taskText}
         />
       ))}
     </CollapsibleSection>
@@ -1535,7 +1548,6 @@ interface TrajectoryGroupCardProps {
   currentGroupMatch?: GroupMatchLocation | null;
   currentGroupMatchRef?: React.RefObject<HTMLSpanElement>;
   preloadedData?: TrajectoryGroup;
-  taskText?: string;
 }
 
 const TrajectoryGroupCard: React.FC<TrajectoryGroupCardProps> = ({
@@ -1549,7 +1561,6 @@ const TrajectoryGroupCard: React.FC<TrajectoryGroupCardProps> = ({
   currentGroupMatch,
   currentGroupMatchRef,
   preloadedData,
-  taskText,
 }) => {
   // State for fetching full trajectory data on demand
   const [fullGroupData, setFullGroupData] = useState<TrajectoryGroup | null>(
@@ -1641,20 +1652,6 @@ const TrajectoryGroupCard: React.FC<TrajectoryGroupCardProps> = ({
             </p>
           ) : (
             <>
-            {taskText && (
-              <div className="mt-2 p-3 bg-white rounded-lg border border-gray-200">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
-                  Task
-                </p>
-                <p className="text-sm text-gray-900">
-                  <HighlightedText
-                    text={taskText}
-                    searchQuery={searchQuery}
-                    searchTerms={searchTerms}
-                  />
-                </p>
-              </div>
-            )}
             {trajectories.map((trajectory, idx) => {
               const trajUid = trajectory.uid || `${group.id}-${idx}`;
               const meta = metadata[idx];
