@@ -133,7 +133,7 @@ const AccountSection: React.FC = () => {
   );
 };
 
-/* ─── rllm-ui API Key Section ─────────────────────────────────────── */
+/* ─── rllm API Key Section ────────────────────────────────────────── */
 
 const ApiKeySection: React.FC = () => {
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
@@ -158,7 +158,7 @@ const ApiKeySection: React.FC = () => {
 
   return (
     <section>
-      <h2 className="text-lg font-semibold text-gray-900 mb-1">rllm-ui API Key</h2>
+      <h2 className="text-lg font-semibold text-gray-900 mb-1">rllm API Key</h2>
       <p className="text-sm text-gray-500 mb-4">
         Use this key to send training data from your rLLM training run to the UI.
       </p>

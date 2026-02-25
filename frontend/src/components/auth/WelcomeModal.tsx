@@ -21,7 +21,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
 
-  const envLine = `RLLM_UI_API_KEY=${apiKey}`;
+  const envLine = `RLLM_API_KEY=${apiKey}`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(envLine);
