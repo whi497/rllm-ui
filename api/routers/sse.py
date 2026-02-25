@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
+from datetime import date, datetime
 
 from auth import CurrentUser
 from datastore.base import DataStore
@@ -11,6 +12,15 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 router = APIRouter(prefix="/api", tags=["sse"])
+
+
+def _json_default(obj: object) -> str:
+    """Handle datetime serialization for json.dumps."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, date):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 # Keepalive interval in seconds (prevents reverse proxies from closing idle connections)
 _KEEPALIVE_INTERVAL = 15
@@ -37,7 +47,7 @@ async def metrics_event_generator(session_id: str, store: DataStore) -> AsyncGen
 
             # Format explicitly or pass through. The router returned id, step, data, created_at.
             # Our store returns exactly these standard columns.
-            yield f"data: {json.dumps(metric)}\n\n"
+            yield f"data: {json.dumps(metric, default=_json_default)}\n\n"
             last_keepalive = time.monotonic()
 
         # Send keepalive comment to prevent reverse proxy timeouts
@@ -75,7 +85,7 @@ async def logs_event_generator(session_id: str, store: DataStore) -> AsyncGenera
         for log in new_logs:
             last_id = log["id"]
             _last_seen_logs[session_id] = last_id
-            yield f"data: {json.dumps(log)}\n\n"
+            yield f"data: {json.dumps(log, default=_json_default)}\n\n"
             last_keepalive = time.monotonic()
 
         # Send keepalive comment to prevent reverse proxy timeouts
