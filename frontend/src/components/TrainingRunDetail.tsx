@@ -19,7 +19,7 @@ import { ConfigRenderer } from "./ConfigRenderer";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { getExperimentColor } from "../utils/experimentColors";
 import { useExperimentVisibility } from "../contexts/ExperimentVisibilityContext";
-import { API_BASE_URL, apiFetch } from "../config/api";
+import { apiFetch } from "../config/api";
 import { Spinner, EmptyState } from "./ui";
 
 type SessionStatus = "running" | "completed" | "failed" | "crashed";
@@ -351,8 +351,6 @@ export const TrainingRunDetail: React.FC = () => {
     );
   }
 
-  const latestMetrics =
-    metrics.length > 0 ? metrics[metrics.length - 1]?.data : null;
   const experimentColor = sessionId ? (colorOverrides[sessionId] || session?.color || getExperimentColor(sessionId)) : undefined;
 
   return (

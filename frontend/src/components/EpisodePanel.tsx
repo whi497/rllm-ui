@@ -1698,7 +1698,7 @@ interface GroupTrajectoryCardProps {
 const GroupTrajectoryCard: React.FC<GroupTrajectoryCardProps> = ({
   trajectory,
   index,
-  metadata,
+  metadata: _metadata,
   isExpanded,
   onToggle,
   searchQuery = "",
