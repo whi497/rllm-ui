@@ -63,7 +63,8 @@ export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
 
             // Then connect to SSE stream for live updates
             const es = new EventSource(
-                `${apiUrl}/api/sessions/${sessionId}/metrics/stream`
+                `${apiUrl}/api/sessions/${sessionId}/metrics/stream`,
+                { withCredentials: true }
             );
             eventSourceRef.current = es;
 
@@ -148,7 +149,8 @@ export function useLogsSSE({ sessionId, enabled = true }: UseSSEOptions) {
             if (aborted) return;
 
             const es = new EventSource(
-                `${apiUrl}/api/sessions/${sessionId}/logs/stream`
+                `${apiUrl}/api/sessions/${sessionId}/logs/stream`,
+                { withCredentials: true }
             );
             eventSourceRef.current = es;
 

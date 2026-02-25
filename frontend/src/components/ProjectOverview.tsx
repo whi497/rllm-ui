@@ -122,7 +122,8 @@ export const ProjectOverview: React.FC = () => {
     const eventSources: EventSource[] = [];
     sessions.forEach((session) => {
       const es = new EventSource(
-        `${apiUrl}/api/sessions/${session.id}/metrics/stream`
+        `${apiUrl}/api/sessions/${session.id}/metrics/stream`,
+        { withCredentials: true }
       );
       es.onmessage = (event) => {
         try {
