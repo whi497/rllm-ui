@@ -203,6 +203,42 @@ const ConfigSection: React.FC<ConfigSectionProps> = ({
   return section;
 };
 
+/** Renders the two-column layout with "No matching fields" in both columns. */
+const TwoColumnEmpty: React.FC<{ data: Record<string, any>; searchQuery: string }> = ({
+  data,
+}) => {
+  const origRllmData = data.rllm as Record<string, any> | undefined;
+  const backendName = origRllmData?.backend;
+  const backendLabel = backendName
+    ? `${backendName.charAt(0).toUpperCase() + backendName.slice(1)} Config`
+    : "Backend Config";
+
+  const empty = (
+    <EmptyState
+      icon={<SearchIcon size={24} className="text-gray-400" />}
+      title="No matching fields"
+      className="py-12 px-4"
+    />
+  );
+
+  return (
+    <div className="flex h-full min-h-0">
+      <div className="w-1/2 overflow-y-auto border-r border-gray-200">
+        <div className="px-4 h-14 border-b border-gray-200 flex items-center sticky top-0 z-10 bg-white">
+          <span className="text-sm font-medium text-gray-900">rllm config</span>
+        </div>
+        {empty}
+      </div>
+      <div className="w-1/2 overflow-y-auto">
+        <div className="px-4 h-14 border-b border-gray-200 flex items-center sticky top-0 z-10 bg-white">
+          <span className="text-sm font-medium text-gray-900">{backendLabel}</span>
+        </div>
+        {empty}
+      </div>
+    </div>
+  );
+};
+
 interface ConfigRendererProps {
   data: Record<string, any>;
   searchQuery: string;
@@ -231,8 +267,17 @@ export const ConfigRenderer: React.FC<ConfigRendererProps> = ({
 
   const configToRender = isSearchActive ? filteredConfig : data;
 
+  // Decide layout from the *original* data so the two-column split is stable during search
+  const hasRllmKey = Object.keys(data).some(
+    (key) => key === "rllm" && !isLeaf(data[key])
+  );
+
   if (!configToRender || Object.keys(configToRender).length === 0) {
     if (isSearchActive) {
+      // In two-column mode, render the empty state inside both columns so the layout stays
+      if (hasRllmKey) {
+        return <TwoColumnEmpty data={data} searchQuery={searchQuery} />;
+      }
       return (
         <EmptyState
           icon={
@@ -265,8 +310,6 @@ export const ConfigRenderer: React.FC<ConfigRendererProps> = ({
       return next;
     });
   };
-
-  const hasRllmKey = topSections.some(([key]) => key === "rllm");
 
   // Helper to render a list of sections
   const renderSections = (
@@ -322,19 +365,41 @@ export const ConfigRenderer: React.FC<ConfigRendererProps> = ({
   }
 
   // Two-column layout: rllm on the left, everything else on the right
-  const rllmData = topSections.find(([key]) => key === "rllm")![1];
+  // Use original data for backend label (stable across searches)
+  const origRllmData = data.rllm as Record<string, any> | undefined;
+  const backendName = origRllmData?.backend;
+  const backendLabel = backendName
+    ? `${backendName.charAt(0).toUpperCase() + backendName.slice(1)} Config`
+    : "Backend Config";
+
+  // Filtered rllm data (may be absent during search)
+  const rllmEntry = topSections.find(([key]) => key === "rllm");
+  const rllmData = rllmEntry ? rllmEntry[1] : null;
   const otherSections = topSections.filter(([key]) => key !== "rllm");
 
   // Break rllm into its sub-sections (rendered directly, not wrapped in a parent collapsible)
   const rllmLeaves: [string, any][] = [];
   const rllmSubSections: [string, Record<string, any>][] = [];
-  for (const [key, value] of Object.entries(rllmData)) {
-    if (isLeaf(value)) {
-      rllmLeaves.push([key, value]);
-    } else {
-      rllmSubSections.push([key, value]);
+  if (rllmData) {
+    for (const [key, value] of Object.entries(rllmData)) {
+      if (isLeaf(value)) {
+        rllmLeaves.push([key, value]);
+      } else {
+        rllmSubSections.push([key, value]);
+      }
     }
   }
+
+  const hasLeftResults = rllmLeaves.length > 0 || rllmSubSections.length > 0;
+  const hasRightResults = topLeaves.length > 0 || otherSections.length > 0;
+
+  const columnEmpty = (
+    <EmptyState
+      icon={<SearchIcon size={24} className="text-gray-400" />}
+      title="No matching fields"
+      className="py-12 px-4"
+    />
+  );
 
   return (
     <div className="flex h-full min-h-0">
@@ -343,36 +408,44 @@ export const ConfigRenderer: React.FC<ConfigRendererProps> = ({
         <div className="px-4 h-14 border-b border-gray-200 flex items-center sticky top-0 z-10 bg-white">
           <span className="text-sm font-medium text-gray-900">rllm config</span>
         </div>
-        {rllmLeaves.length > 0 && (
-          <dl className="bg-layer-1 border-b border-gray-200">
-            {rllmLeaves.map(([key, value]) => (
-              <div
-                key={key}
-                className="px-4 py-2 flex justify-between items-start gap-4"
-              >
-                <dt className="text-sm text-gray-500">
-                  <HighlightedText text={key} searchQuery={searchQuery} />
-                </dt>
-                <dd className="text-sm text-gray-900 text-right font-mono">
-                  <HighlightedText
-                    text={formatConfigValue(value)}
-                    searchQuery={searchQuery}
-                  />
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
-        {renderSections(rllmSubSections, "rllm")}
+        {hasLeftResults ? (
+          <>
+            {rllmLeaves.length > 0 && (
+              <dl className="bg-layer-1 border-b border-gray-200">
+                {rllmLeaves.map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="px-4 py-2 flex justify-between items-start gap-4"
+                  >
+                    <dt className="text-sm text-gray-500">
+                      <HighlightedText text={key} searchQuery={searchQuery} />
+                    </dt>
+                    <dd className="text-sm text-gray-900 text-right font-mono">
+                      <HighlightedText
+                        text={formatConfigValue(value)}
+                        searchQuery={searchQuery}
+                      />
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {renderSections(rllmSubSections, "rllm")}
+          </>
+        ) : isSearchActive ? columnEmpty : null}
       </div>
 
       {/* Right column: backend config */}
       <div className="w-1/2 overflow-y-auto">
         <div className="px-4 h-14 border-b border-gray-200 flex items-center sticky top-0 z-10 bg-white">
-          <span className="text-sm font-medium text-gray-900">Backend config</span>
+          <span className="text-sm font-medium text-gray-900">{backendLabel}</span>
         </div>
-        {renderTopLeaves()}
-        {renderSections(otherSections)}
+        {hasRightResults ? (
+          <>
+            {renderTopLeaves()}
+            {renderSections(otherSections)}
+          </>
+        ) : isSearchActive ? columnEmpty : null}
       </div>
     </div>
   );
