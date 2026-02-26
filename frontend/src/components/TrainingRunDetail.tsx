@@ -232,7 +232,8 @@ export const TrainingRunDetail: React.FC = () => {
     }
   }, [sessionId, fetchSessionDetails, fetchEpisodes]);
 
-  usePolling(fetchEpisodes, { interval: 3000, enabled: !!sessionId && isConnected });
+  const isRunning = session?.status === 'running';
+  usePolling(fetchEpisodes, { interval: 5000, enabled: !!sessionId && isRunning });
 
   useEffect(() => {
     if (metrics.length > 0 && selectedMetrics.length === 0) {
