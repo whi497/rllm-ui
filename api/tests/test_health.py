@@ -9,4 +9,6 @@ def test_health_check_returns_ok(client):
     response = client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    data = response.json()
+    assert data["status"] == "ok"
+    assert "datastore" in data
