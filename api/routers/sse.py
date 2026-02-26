@@ -25,39 +25,32 @@ def _json_default(obj: object) -> str:
 # Keepalive interval in seconds (prevents reverse proxies from closing idle connections)
 _KEEPALIVE_INTERVAL = 15
 
-# Simple in-memory state for tracking last seen IDs
-# In production, this could use Redis or similar
-_last_seen_metrics: dict[str, int] = {}
-_last_seen_logs: dict[str, int] = {}
-
-
 async def metrics_event_generator(session_id: str, store: DataStore) -> AsyncGenerator[str, None]:
     """Generate SSE events for new metrics."""
-    last_id = _last_seen_metrics.get(session_id, 0)
+    last_id = 0
     last_keepalive = time.monotonic()
+    poll_count = 0
 
     while True:
-        # Check for new metrics using DataStore
         new_metrics = store.get_new_metrics(session_id, last_id)
 
-        # Send new metrics as SSE events
         for metric in new_metrics:
             last_id = metric["id"]
-            _last_seen_metrics[session_id] = last_id
-
-            # Format explicitly or pass through. The router returned id, step, data, created_at.
-            # Our store returns exactly these standard columns.
             yield f"data: {json.dumps(metric, default=_json_default)}\n\n"
             last_keepalive = time.monotonic()
 
-        # Send keepalive comment to prevent reverse proxy timeouts
         now = time.monotonic()
         if now - last_keepalive >= _KEEPALIVE_INTERVAL:
             yield ": keepalive\n\n"
             last_keepalive = now
 
-        # Wait before polling again
-        await asyncio.sleep(0.5)
+        poll_count += 1
+        if poll_count % 6 == 0:
+            session = store.get_session(session_id)
+            if not session or session["status"] in ("completed", "failed", "crashed"):
+                break
+
+        await asyncio.sleep(5)
 
 
 @router.get("/sessions/{session_id}/metrics/stream")
@@ -76,25 +69,30 @@ async def stream_metrics(request: Request, session_id: str, user: CurrentUser):
 
 async def logs_event_generator(session_id: str, store: DataStore) -> AsyncGenerator[str, None]:
     """Generate SSE events for new log entries."""
-    last_id = _last_seen_logs.get(session_id, 0)
+    last_id = 0
     last_keepalive = time.monotonic()
+    poll_count = 0
 
     while True:
         new_logs = store.get_new_logs(session_id, last_id)
 
         for log in new_logs:
             last_id = log["id"]
-            _last_seen_logs[session_id] = last_id
             yield f"data: {json.dumps(log, default=_json_default)}\n\n"
             last_keepalive = time.monotonic()
 
-        # Send keepalive comment to prevent reverse proxy timeouts
         now = time.monotonic()
         if now - last_keepalive >= _KEEPALIVE_INTERVAL:
             yield ": keepalive\n\n"
             last_keepalive = now
 
-        await asyncio.sleep(0.5)
+        poll_count += 1
+        if poll_count % 6 == 0:
+            session = store.get_session(session_id)
+            if not session or session["status"] in ("completed", "failed", "crashed"):
+                break
+
+        await asyncio.sleep(5)
 
 
 @router.get("/sessions/{session_id}/logs/stream")
