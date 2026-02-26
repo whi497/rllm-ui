@@ -172,14 +172,18 @@ export const TrainingRunDetail: React.FC = () => {
     };
   }, [isDragging, handleMouseMove, handleMouseUp]);
 
+  const isRunning = session?.status === 'running';
+
   const { metrics, isConnected } = useMetricsSSE({
     sessionId: sessionId || "",
     enabled: !!sessionId,
+    stream: isRunning,
   });
 
   const { logs, isLoading: logsLoading } = useLogsSSE({
     sessionId: sessionId || "",
     enabled: !!sessionId,
+    stream: isRunning,
   });
 
   const fetchSessionDetails = useCallback(async () => {
@@ -232,7 +236,6 @@ export const TrainingRunDetail: React.FC = () => {
     }
   }, [sessionId, fetchSessionDetails, fetchEpisodes]);
 
-  const isRunning = session?.status === 'running';
   usePolling(fetchEpisodes, { interval: 5000, enabled: !!sessionId && isRunning });
 
   useEffect(() => {

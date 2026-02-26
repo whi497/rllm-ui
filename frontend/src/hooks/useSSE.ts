@@ -20,9 +20,11 @@ export interface LogEntry {
 interface UseSSEOptions {
     sessionId: string;
     enabled?: boolean;
+    /** Whether to open an SSE stream for live updates (default: true). When false, only the initial fetch runs. */
+    stream?: boolean;
 }
 
-export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
+export function useMetricsSSE({ sessionId, enabled = true, stream = true }: UseSSEOptions) {
     const [metrics, setMetrics] = useState<Metric[]>([]);
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<Error | null>(null);
@@ -60,7 +62,7 @@ export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
                 console.error('[Metrics] Failed to fetch initial metrics:', e);
             }
 
-            if (abortedRef.current) return;
+            if (abortedRef.current || !stream) return;
 
             // Then connect to SSE stream for live updates
             const es = new EventSource(
@@ -120,19 +122,21 @@ export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
             initialize();
         }
 
-        document.addEventListener('visibilitychange', handleVisibility);
+        if (stream) {
+            document.addEventListener('visibilitychange', handleVisibility);
+        }
 
         return () => {
             abortedRef.current = true;
             closeSSE();
             document.removeEventListener('visibilitychange', handleVisibility);
         };
-    }, [sessionId, enabled]);
+    }, [sessionId, enabled, stream]);
 
     return { metrics, isConnected, error };
 }
 
-export function useLogsSSE({ sessionId, enabled = true }: UseSSEOptions) {
+export function useLogsSSE({ sessionId, enabled = true, stream = true }: UseSSEOptions) {
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isConnected, setIsConnected] = useState(false);
@@ -167,7 +171,7 @@ export function useLogsSSE({ sessionId, enabled = true }: UseSSEOptions) {
                 if (!abortedRef.current) setIsLoading(false);
             }
 
-            if (abortedRef.current) return;
+            if (abortedRef.current || !stream) return;
 
             const es = new EventSource(
                 `${apiUrl}/api/sessions/${sessionId}/logs/stream`,
@@ -223,14 +227,16 @@ export function useLogsSSE({ sessionId, enabled = true }: UseSSEOptions) {
             initialize();
         }
 
-        document.addEventListener('visibilitychange', handleVisibility);
+        if (stream) {
+            document.addEventListener('visibilitychange', handleVisibility);
+        }
 
         return () => {
             abortedRef.current = true;
             closeSSE();
             document.removeEventListener('visibilitychange', handleVisibility);
         };
-    }, [sessionId, enabled]);
+    }, [sessionId, enabled, stream]);
 
     return { logs, isLoading, isConnected, error };
 }
