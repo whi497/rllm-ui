@@ -67,6 +67,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       setMessages([]);
       return;
     }
+    // Skip reload while streaming — the activeChatSessionId changes mid-stream
+    // when the backend auto-creates a session, and reloading would clobber the
+    // in-progress messages (assistant response isn't persisted until stream ends).
+    if (isLoading) return;
     let cancelled = false;
     const loadMessages = async () => {
       try {
