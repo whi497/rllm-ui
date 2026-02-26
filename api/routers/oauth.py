@@ -24,14 +24,14 @@ OAUTH_STATE_COOKIE = "oauth_state"
 
 
 def _get_frontend_url(request: Request) -> str:
-    """Derive the frontend URL from CORS_ORIGINS or fall back to request origin."""
+    """Derive the frontend URL from CORS_ORIGINS or fall back to request base URL."""
     cors_origins = os.environ.get("CORS_ORIGINS", "")
     if cors_origins:
         return cors_origins.split(",")[0].strip()
     origin = request.headers.get("origin")
     if origin:
         return origin
-    return "http://localhost:5173"
+    return str(request.base_url).rstrip("/")
 
 
 def _get_callback_url(request: Request, provider: str) -> str:
