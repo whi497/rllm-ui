@@ -19,6 +19,7 @@ import { useExperimentVisibility } from "../contexts/ExperimentVisibilityContext
 import { apiFetch } from "../config/api";
 import { useClickOutside } from "./ui";
 import { useAuth } from "../contexts/AuthContext";
+import { usePolling } from "../hooks/usePolling";
 
 interface Session {
   id: string;
@@ -104,11 +105,8 @@ export const Sidebar: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
-    fetchProjects();
-    const interval = setInterval(fetchProjects, 10000);
-    return () => clearInterval(interval);
-  }, [fetchProjects]);
+  const hasRunningSessions = projects.some(p => p.sessions.some(s => s.status === 'running'));
+  usePolling(fetchProjects, { interval: hasRunningSessions ? 10000 : 60000 });
 
   // Auto-collapse main sidebar when navigating away from home (project overview, run, or settings)
   useEffect(() => {

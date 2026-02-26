@@ -28,12 +28,13 @@ export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
     const [error, setError] = useState<Error | null>(null);
     const seenIds = useRef(new Set<number>());
     const eventSourceRef = useRef<EventSource | null>(null);
+    const abortedRef = useRef(false);
 
     useEffect(() => {
         if (!enabled || !sessionId) return;
 
         const apiUrl = API_BASE_URL;
-        let aborted = false;
+        abortedRef.current = false;
 
         // Reset state
         seenIds.current = new Set();
@@ -45,7 +46,7 @@ export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
                 // Fetch historical metrics
                 console.log('[Metrics] Fetching initial metrics...');
                 const response = await apiFetch(`/api/sessions/${sessionId}/metrics`);
-                if (aborted) return;
+                if (abortedRef.current) return;
                 if (response.ok) {
                     const data: Metric[] = await response.json();
                     console.log('[Metrics] Fetched initial metrics:', data.length);
@@ -55,11 +56,11 @@ export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
                     setMetrics(data);
                 }
             } catch (e) {
-                if (aborted) return;
+                if (abortedRef.current) return;
                 console.error('[Metrics] Failed to fetch initial metrics:', e);
             }
 
-            if (aborted) return;
+            if (abortedRef.current) return;
 
             // Then connect to SSE stream for live updates
             const es = new EventSource(
@@ -97,15 +98,34 @@ export function useMetricsSSE({ sessionId, enabled = true }: UseSSEOptions) {
             };
         };
 
-        initialize();
-
-        return () => {
-            aborted = true;
+        const closeSSE = () => {
             if (eventSourceRef.current) {
                 eventSourceRef.current.close();
                 eventSourceRef.current = null;
             }
             setIsConnected(false);
+        };
+
+        const handleVisibility = () => {
+            if (document.hidden) {
+                closeSSE();
+            } else {
+                // Re-initialize: fetches history (seenIds deduplicates) + opens new SSE
+                initialize();
+            }
+        };
+
+        // Start immediately if tab is visible
+        if (!document.hidden) {
+            initialize();
+        }
+
+        document.addEventListener('visibilitychange', handleVisibility);
+
+        return () => {
+            abortedRef.current = true;
+            closeSSE();
+            document.removeEventListener('visibilitychange', handleVisibility);
         };
     }, [sessionId, enabled]);
 
@@ -119,12 +139,13 @@ export function useLogsSSE({ sessionId, enabled = true }: UseSSEOptions) {
     const [error, setError] = useState<Error | null>(null);
     const seenIds = useRef(new Set<number>());
     const eventSourceRef = useRef<EventSource | null>(null);
+    const abortedRef = useRef(false);
 
     useEffect(() => {
         if (!enabled || !sessionId) return;
 
         const apiUrl = API_BASE_URL;
-        let aborted = false;
+        abortedRef.current = false;
 
         seenIds.current = new Set();
         setLogs([]);
@@ -133,20 +154,20 @@ export function useLogsSSE({ sessionId, enabled = true }: UseSSEOptions) {
         const initialize = async () => {
             try {
                 const response = await apiFetch(`/api/sessions/${sessionId}/logs?limit=5000`);
-                if (aborted) return;
+                if (abortedRef.current) return;
                 if (response.ok) {
                     const data: LogEntry[] = await response.json();
                     data.forEach(l => seenIds.current.add(l.id));
                     setLogs(data);
                 }
             } catch (e) {
-                if (aborted) return;
+                if (abortedRef.current) return;
                 console.error('[Logs] Failed to fetch initial logs:', e);
             } finally {
-                if (!aborted) setIsLoading(false);
+                if (!abortedRef.current) setIsLoading(false);
             }
 
-            if (aborted) return;
+            if (abortedRef.current) return;
 
             const es = new EventSource(
                 `${apiUrl}/api/sessions/${sessionId}/logs/stream`,
@@ -182,15 +203,32 @@ export function useLogsSSE({ sessionId, enabled = true }: UseSSEOptions) {
             };
         };
 
-        initialize();
-
-        return () => {
-            aborted = true;
+        const closeSSE = () => {
             if (eventSourceRef.current) {
                 eventSourceRef.current.close();
                 eventSourceRef.current = null;
             }
             setIsConnected(false);
+        };
+
+        const handleVisibility = () => {
+            if (document.hidden) {
+                closeSSE();
+            } else {
+                initialize();
+            }
+        };
+
+        if (!document.hidden) {
+            initialize();
+        }
+
+        document.addEventListener('visibilitychange', handleVisibility);
+
+        return () => {
+            abortedRef.current = true;
+            closeSSE();
+            document.removeEventListener('visibilitychange', handleVisibility);
         };
     }, [sessionId, enabled]);
 

@@ -15,6 +15,7 @@ import { getExperimentColor } from "../utils/experimentColors";
 import { useExperimentVisibility } from "../contexts/ExperimentVisibilityContext";
 import type { Metric } from "../hooks/useSSE";
 import { API_BASE_URL, apiFetch } from "../config/api";
+import { usePolling } from "../hooks/usePolling";
 
 interface Session {
   id: string;
@@ -86,11 +87,8 @@ export const ProjectOverview: React.FC = () => {
     }
   }, [projectId]);
 
-  useEffect(() => {
-    fetchSessions();
-    const interval = setInterval(fetchSessions, 5000);
-    return () => clearInterval(interval);
-  }, [fetchSessions]);
+  const hasRunningSessions = sessions.some(s => s.status === 'running');
+  usePolling(fetchSessions, { interval: hasRunningSessions ? 5000 : 60000 });
 
   // Fetch metrics for each session
   useEffect(() => {
@@ -118,9 +116,10 @@ export const ProjectOverview: React.FC = () => {
       }
     });
 
-    // Also open SSE streams for live updates
+    // Also open SSE streams for live updates (only for running sessions)
     const eventSources: EventSource[] = [];
-    sessions.forEach((session) => {
+    const runningSessions = sessions.filter(s => s.status === 'running');
+    runningSessions.forEach((session) => {
       const es = new EventSource(
         `${apiUrl}/api/sessions/${session.id}/metrics/stream`,
         { withCredentials: true }

@@ -21,6 +21,7 @@ import { getExperimentColor } from "../utils/experimentColors";
 import { useExperimentVisibility } from "../contexts/ExperimentVisibilityContext";
 import { apiFetch } from "../config/api";
 import { Spinner, EmptyState } from "./ui";
+import { usePolling } from "../hooks/usePolling";
 
 type SessionStatus = "running" | "completed" | "failed" | "crashed";
 
@@ -181,6 +182,38 @@ export const TrainingRunDetail: React.FC = () => {
     enabled: !!sessionId,
   });
 
+  const fetchSessionDetails = useCallback(async () => {
+    try {
+      const response = await apiFetch(
+        `/api/sessions/${sessionId}`
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const data = await response.json();
+      setSession(data);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [sessionId]);
+
+  const fetchEpisodes = useCallback(async () => {
+    try {
+      const response = await apiFetch(
+        `/api/episodes?session_id=${sessionId}`
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const data = await response.json();
+      setEpisodes(data);
+    } catch (err: any) {
+      console.error("Error fetching episodes:", err);
+    }
+  }, [sessionId]);
+
   useEffect(() => {
     if (sessionId) {
       fetchSessionDetails();
@@ -197,17 +230,9 @@ export const TrainingRunDetail: React.FC = () => {
         })
         .catch(() => setActiveChatSessionId(null));
     }
-  }, [sessionId]);
+  }, [sessionId, fetchSessionDetails, fetchEpisodes]);
 
-  useEffect(() => {
-    if (!sessionId || !isConnected) return;
-
-    const interval = setInterval(() => {
-      fetchEpisodes();
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [sessionId, isConnected]);
+  usePolling(fetchEpisodes, { interval: 3000, enabled: !!sessionId && isConnected });
 
   useEffect(() => {
     if (metrics.length > 0 && selectedMetrics.length === 0) {
@@ -238,38 +263,6 @@ export const TrainingRunDetail: React.FC = () => {
   const removeMetricChart = (index: number) => {
     if (selectedMetrics.length > 1) {
       setSelectedMetrics(selectedMetrics.filter((_, i) => i !== index));
-    }
-  };
-
-  const fetchSessionDetails = async () => {
-    try {
-      const response = await apiFetch(
-        `/api/sessions/${sessionId}`
-      );
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      const data = await response.json();
-      setSession(data);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchEpisodes = async () => {
-    try {
-      const response = await apiFetch(
-        `/api/episodes?session_id=${sessionId}`
-      );
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      const data = await response.json();
-      setEpisodes(data);
-    } catch (err: any) {
-      console.error("Error fetching episodes:", err);
     }
   };
 

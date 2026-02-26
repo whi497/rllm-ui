@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SearchIcon, WarningIcon, BarChartIcon } from './icons';
 import { Spinner, EmptyState } from './ui';
 import { ActionMenu } from './ActionMenu';
 import { ConfirmDialog } from './ConfirmDialog';
 import { apiFetch } from '../config/api';
+import { usePolling } from '../hooks/usePolling';
 
 type SessionStatus = "running" | "completed" | "failed" | "crashed";
 
@@ -62,11 +63,8 @@ export const ProjectList: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
-    fetchSessions();
-    const interval = setInterval(fetchSessions, 5000);
-    return () => clearInterval(interval);
-  }, [fetchSessions]);
+  const hasRunningSessions = sessions.some(s => s.status === 'running');
+  usePolling(fetchSessions, { interval: hasRunningSessions ? 5000 : 60000 });
 
   // Group sessions into projects
   const projects = useMemo((): ProjectData[] => {
