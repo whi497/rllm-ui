@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { apiFetch } from "../config/api";
+import { useAuth } from "../contexts/AuthContext";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -36,6 +38,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     () => localStorage.getItem(MODEL_STORAGE_KEY) || MODEL_OPTIONS[1].value
   );
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState<"missing" | "invalid" | null>(null);
+
+  const { config } = useAuth();
+  const navigate = useNavigate();
+  const isCloud = config?.auth_required ?? false;
+
+  /** Detect API-key-related errors and return a category, or null. */
+  const detectApiKeyError = (msg: string): "missing" | "invalid" | null => {
+    if (!isCloud) return null;
+    if (/authentication_error|invalid.*api.?key|invalid x-api-key/i.test(msg))
+      return "invalid";
+    return null;
+  };
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
@@ -172,6 +187,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     setInput("");
     setIsLoading(true);
     setError(null);
+    setApiKeyError(null);
     setCurrentTool(null);
     wasUsingToolRef.current = false;
 
@@ -201,7 +217,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        throw new Error(err.detail || `HTTP ${response.status}`);
+        const detail = err.detail || `HTTP ${response.status}`;
+        if (response.status === 503 && isCloud && detail.includes("API key")) {
+          setApiKeyError("missing");
+        } else {
+          const keyErr = detectApiKeyError(detail);
+          if (keyErr) setApiKeyError(keyErr);
+        }
+        throw new Error(detail);
       }
 
       const reader = response.body?.getReader();
@@ -256,6 +279,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 onChatSessionIdChange(parsed.chat_session_id);
               }
             } else if (parsed.type === "error") {
+              const keyErr = detectApiKeyError(parsed.message || "");
+              if (keyErr) setApiKeyError(keyErr);
               setError(parsed.message);
               setMessages((prev) => {
                 const last = prev[prev.length - 1];
@@ -273,7 +298,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return;
 
-      setError(err instanceof Error ? err.message : "Failed to send message");
+      const errMsg = err instanceof Error ? err.message : "Failed to send message";
+      const keyErr = detectApiKeyError(errMsg);
+      if (keyErr) setApiKeyError(keyErr);
+      setError(errMsg);
       setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (last?.role === "assistant" && !last.content) {
@@ -347,7 +375,35 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           </div>
         )}
 
-        {error && (
+        {apiKeyError && (
+          <div className="bg-red-50 border border-red-300 px-4 py-3 rounded-lg">
+            <div className="flex items-start gap-2">
+              <svg className="w-5 h-5 text-red-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="text-sm font-medium text-red-800">
+                  {apiKeyError === "missing"
+                    ? "Anthropic API key not configured"
+                    : "Anthropic API key is invalid"}
+                </p>
+                <p className="text-sm text-red-600 mt-0.5">
+                  {apiKeyError === "missing"
+                    ? "To use the agent, add your Anthropic API key in "
+                    : "Check or update your Anthropic API key in "}
+                  <button
+                    onClick={() => navigate("/settings")}
+                    className="underline font-medium hover:text-red-800"
+                  >
+                    Settings
+                  </button>.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {error && !apiKeyError && (
           <div className="bg-red-50 border border-red-200 px-3 py-2 rounded-lg">
             <p className="text-sm text-red-600">{error}</p>
           </div>
