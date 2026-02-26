@@ -5,6 +5,7 @@ Derives a Fernet key from JWT_SECRET via PBKDF2 so we don't need a second secret
 
 import base64
 import os
+from functools import lru_cache
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -13,6 +14,7 @@ from cryptography.hazmat.primitives import hashes
 _SALT = b"rllm-ui-settings-v1"  # fixed salt — key uniqueness comes from JWT_SECRET
 
 
+@lru_cache(maxsize=1)
 def _get_fernet() -> Fernet:
     jwt_secret = os.environ.get("JWT_SECRET", "")
     if not jwt_secret:

@@ -41,8 +41,13 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Database connection attempt {attempt}/{max_retries} failed: {e}. Retrying in 3s...")
             time.sleep(3)
 
-    # Initialize agent if API key is available
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    # Initialize global agent (local mode only — cloud mode uses per-user keys)
+    from auth import IS_CLOUD
+
+    if IS_CLOUD:
+        logger.info("Cloud mode: skipping global agent init (per-user keys only)")
+        app.state.agent = None
+    elif os.environ.get("ANTHROPIC_API_KEY"):
         try:
             from agent import ObservabilityAgent
 

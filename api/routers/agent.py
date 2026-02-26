@@ -18,12 +18,11 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 def _resolve_agent(request: Request, user: dict | None):
     """Return an ObservabilityAgent for this request.
 
-    Priority:
-    1. User's stored Anthropic API key (cloud mode) -> per-request agent
-    2. Global agent from env var (app.state.agent)
+    Cloud mode: only per-user keys (configured in Settings).
+    Local mode: global agent from ANTHROPIC_API_KEY env var.
     """
-    if IS_CLOUD and user:
-        try:
+    if IS_CLOUD:
+        if user:
             from encryption import decrypt_value
 
             store = request.app.state.store
@@ -34,10 +33,9 @@ def _resolve_agent(request: Request, user: dict | None):
                 from agent import ObservabilityAgent
 
                 return ObservabilityAgent(datastore=store, api_key=api_key)
-        except Exception as e:
-            logger.debug(f"Could not load user API key: {e}")
+        return None  # no fallback to global agent in cloud mode
 
-    # Fall back to global agent
+    # Local mode: use global agent
     return getattr(request.app.state, "agent", None)
 
 
@@ -115,10 +113,12 @@ def chat(request: Request, body: ChatRequest, user: CurrentUser):
     """
     agent = _resolve_agent(request, user)
     if agent is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Agent not available. Configure your Anthropic API key in Settings, or set the ANTHROPIC_API_KEY environment variable.",
+        detail = (
+            "Agent not available. Configure your Anthropic API key in Settings."
+            if IS_CLOUD
+            else "Agent not available. Set the ANTHROPIC_API_KEY environment variable."
         )
+        raise HTTPException(status_code=503, detail=detail)
 
     try:
         # Convert history to list of dicts if provided
@@ -148,10 +148,12 @@ def chat_stream(request: Request, body: ChatRequest, user: CurrentUser):
     """
     agent = _resolve_agent(request, user)
     if agent is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Agent not available. Configure your Anthropic API key in Settings, or set the ANTHROPIC_API_KEY environment variable.",
+        detail = (
+            "Agent not available. Configure your Anthropic API key in Settings."
+            if IS_CLOUD
+            else "Agent not available. Set the ANTHROPIC_API_KEY environment variable."
         )
+        raise HTTPException(status_code=503, detail=detail)
 
     store = request.app.state.store
 
