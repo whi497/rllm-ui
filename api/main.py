@@ -77,6 +77,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     crash_task.cancel()
+    app.state.store.close()
 
 
 # Create FastAPI app

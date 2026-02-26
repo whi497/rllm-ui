@@ -340,3 +340,7 @@ class DataStore(ABC):
     def append_chat_message(self, chat_session_id: str, role: str, content: str) -> dict[str, Any]:
         """Append a message to a chat session. Updates the session's updated_at. Returns the message dict."""
         pass
+
+    def close(self):
+        """Close any resources held by the data store (e.g. connection pools)."""
+        pass

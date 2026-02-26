@@ -1,6 +1,7 @@
 """PostgreSQL implementation of DataStore."""
 
 import json
+import queue
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -8,6 +9,7 @@ from typing import Any
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import ThreadedConnectionPool
 
 from .base import DataStore, extract_searchable_text
 
@@ -15,17 +17,37 @@ from .base import DataStore, extract_searchable_text
 class PostgresStore(DataStore):
     """PostgreSQL-backed data store."""
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, minconn: int = 2, maxconn: int = 10):
         self.url = url
+        self._pool = ThreadedConnectionPool(
+            minconn, maxconn, url,
+            cursor_factory=RealDictCursor,
+            connect_timeout=5,
+        )
+        self._conn_queue = queue.Queue(maxsize=maxconn)
+        for _ in range(maxconn):
+            self._conn_queue.put_nowait(True)
 
     @contextmanager
     def _get_conn(self):
-        """Get a database connection with RealDictCursor for dict-like row access."""
-        conn = psycopg2.connect(self.url, cursor_factory=RealDictCursor, connect_timeout=5)
+        """Borrow a connection from the pool; wait if all are checked out (FIFO)."""
         try:
-            yield conn
+            self._conn_queue.get(timeout=5)
+        except queue.Empty:
+            raise psycopg2.OperationalError("Timed out waiting for a database connection")
+        try:
+            conn = self._pool.getconn()
+            try:
+                yield conn
+            finally:
+                self._pool.putconn(conn)
         finally:
-            conn.close()
+            self._conn_queue.put_nowait(True)
+
+    def close(self):
+        """Close all connections in the pool."""
+        if self._pool:
+            self._pool.closeall()
 
     def init_db(self):
         """Initialize the database schema."""
