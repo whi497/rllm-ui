@@ -13,6 +13,4 @@ def health_check(request: Request):
     return {
         "status": "ok",
         "datastore": store_type,
-        "_debug_base_url": str(request.base_url),
-        "_debug_headers": dict(request.headers),
     }
