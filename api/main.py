@@ -8,8 +8,6 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,7 +15,6 @@ load_dotenv()
 from datastore.factory import get_datastore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from routers import agent, auth, episodes, health, logs, metrics, oauth, sessions, settings, sse, trajectory_groups
 
 logger = logging.getLogger(__name__)
@@ -121,21 +118,3 @@ app.include_router(agent.router)
 app.include_router(settings.router)
 app.include_router(logs.router)
 app.include_router(trajectory_groups.router)
-
-# Serve built frontend static files in production (Docker / Railway)
-_static_dir = Path(__file__).parent / "static"
-if _static_dir.is_dir():
-    from fastapi.responses import FileResponse
-
-    # Mount static assets (js, css, images, etc.)
-    app.mount("/assets", StaticFiles(directory=_static_dir / "assets"), name="static-assets")
-
-    # Serve other static files at root (favicon, logos, etc.) but only for exact matches
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        """Catch-all route for SPA client-side routing."""
-        file_path = _static_dir / full_path
-        if file_path.is_file():
-            return FileResponse(file_path)
-        # Fall back to index.html for client-side routes
-        return FileResponse(_static_dir / "index.html")
