@@ -35,9 +35,9 @@ def _get_frontend_url(request: Request) -> str:
 
 
 def _get_callback_url(request: Request, provider: str) -> str:
-    """Build the OAuth callback URL from the request base URL."""
-    base = str(request.base_url).rstrip("/")
-    return f"{base}/api/oauth/{provider}/callback"
+    """Build the OAuth callback URL from the frontend URL (not the API's internal URL)."""
+    frontend_url = _get_frontend_url(request)
+    return f"{frontend_url}/api/oauth/{provider}/callback"
 
 
 # ── GitHub ───────────────────────────────────────────────────────
