@@ -1,0 +1,5 @@
+/* Override Prism theme background so code blocks use the app's background */
+code[class*="language-"],
+pre[class*="language-"] {
+  background: var(--color-bg) !important;
+}

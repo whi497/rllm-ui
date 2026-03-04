@@ -60,8 +60,12 @@ export const ExperimentVisibilityProvider: React.FC<{
   }, []);
 
   const hideAll = useCallback((sessionIds: string[]) => {
-    setHiddenExperiments(new Set(sessionIds));
-  }, []);
+    setHiddenExperiments((prev) => {
+      // Keep pinned experiments visible
+      const filtered = sessionIds.filter((id) => !pinnedExperiments.includes(id));
+      return new Set(filtered);
+    });
+  }, [pinnedExperiments]);
 
   const updateColor = useCallback((sessionId: string, color: string) => {
     // Optimistic update — all consumers re-render immediately
