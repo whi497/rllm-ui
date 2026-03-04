@@ -14,3 +14,12 @@ def health_check(request: Request):
         "status": "ok",
         "datastore": store_type,  # "SQLiteStore" or "PostgresStore"
     }
+
+
+@router.get("/debug/headers")
+def debug_headers(request: Request):
+    """Temporary: inspect forwarded headers from the proxy."""
+    return {
+        "base_url": str(request.base_url),
+        "headers": dict(request.headers),
+    }
