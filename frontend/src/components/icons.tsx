@@ -35,4 +35,6 @@ export {
   // Docs link icons
   BookOpen as MenuBookIcon,
   ArrowUpRight as NorthEastIcon,
+  // Expand/maximize icon for chart detail view
+  Maximize2 as MaximizeIcon,
 } from "lucide-react";

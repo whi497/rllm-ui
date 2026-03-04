@@ -3,8 +3,9 @@
 import React, { useState, useMemo } from "react";
 import type { Metric } from "../hooks/useSSE";
 import { RewardChart, getAvailableMetrics } from "./RewardChart";
-import { BarChartIcon, SearchIcon } from "./icons";
+import { BarChartIcon, SearchIcon, MaximizeIcon } from "./icons";
 import { EmptyState, ThreeDotMenu, CollapsibleSection } from "./ui";
+import { MetricDetailModal } from "./MetricDetailModal";
 
 interface MetricsDashboardProps {
   metrics: Metric[];
@@ -72,8 +73,9 @@ const DashboardChart: React.FC<{
   metrics: Metric[];
   searchQuery: string;
   onStepClick: (step: number, metricKey: string) => void;
+  onExpand: (metricKey: string) => void;
   color?: string;
-}> = ({ metricKey, metrics, searchQuery, onStepClick, color }) => {
+}> = ({ metricKey, metrics, searchQuery, onStepClick, onExpand, color }) => {
   const displayName = metricKey.split("/").slice(1).join("/") || metricKey;
 
   const handleStepClick = (step: number | null) => {
@@ -84,10 +86,17 @@ const DashboardChart: React.FC<{
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 flex flex-col overflow-hidden hover:border-gray-300 transition-colors">
-      <div className="px-3 py-2 border-b border-gray-100">
+      <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
         <span className="text-xs font-medium text-gray-700 font-mono truncate">
           <HighlightText text={displayName} query={searchQuery} />
         </span>
+        <button
+          onClick={() => onExpand(metricKey)}
+          className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
+          title="Expand chart"
+        >
+          <MaximizeIcon size={14} />
+        </button>
       </div>
       <div className="h-44 p-1">
         <RewardChart
@@ -112,8 +121,9 @@ const MetricGroup: React.FC<{
   isExpanded: boolean;
   onToggle: () => void;
   onStepClick: (step: number, metricKey: string) => void;
+  onExpand: (metricKey: string) => void;
   color?: string;
-}> = ({ prefix, metricKeys, totalCount, metrics, searchQuery, isExpanded, onToggle, onStepClick, color }) => {
+}> = ({ prefix, metricKeys, totalCount, metrics, searchQuery, isExpanded, onToggle, onStepClick, onExpand, color }) => {
   const isFiltering = searchQuery.trim().length > 0;
   return (
     <CollapsibleSection
@@ -140,6 +150,7 @@ const MetricGroup: React.FC<{
           metrics={metrics}
           searchQuery={searchQuery}
           onStepClick={onStepClick}
+          onExpand={onExpand}
           color={color}
         />
       ))}
@@ -158,6 +169,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   onHasAutoExpandedChange: setHasAutoExpanded,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
+  const [detailMetric, setDetailMetric] = useState<string | null>(null);
 
   const availableMetrics = useMemo(() => getAvailableMetrics(metrics), [metrics]);
   const grouped = useMemo(() => groupMetricsByPrefix(availableMetrics), [availableMetrics]);
@@ -224,6 +236,14 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      <MetricDetailModal
+        open={detailMetric !== null}
+        onClose={() => setDetailMetric(null)}
+        metrics={metrics}
+        metricKey={detailMetric ?? ""}
+        color={color}
+      />
+
       {/* Sticky header with search */}
       <div className="px-4 py-3 border-b border-gray-200 flex items-center gap-3 bg-white flex-shrink-0">
         <div className="flex-1 relative">
@@ -286,6 +306,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
               isExpanded={expandedGroups.has(prefix)}
               onToggle={() => toggleGroup(prefix)}
               onStepClick={onChartClick}
+              onExpand={setDetailMetric}
               color={color}
             />
           ))

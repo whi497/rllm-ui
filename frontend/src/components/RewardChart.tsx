@@ -10,6 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  Brush,
 } from "recharts";
 import type { Metric } from "../hooks/useSSE";
 import { EmptyState } from "./ui";
@@ -25,6 +26,12 @@ interface MetricChartProps {
   selectedStep: number | null;
   onStepClick: (step: number | null) => void;
   color?: string;
+  xDomainMin?: number;
+  xDomainMax?: number;
+  yDomainMin?: number;
+  yDomainMax?: number;
+  showBrush?: boolean;
+  onBrushChange?: (startIndex: number, endIndex: number) => void;
 }
 
 /**
@@ -37,6 +44,12 @@ export const RewardChart: React.FC<MetricChartProps> = ({
   selectedStep,
   onStepClick,
   color = "#345f94",
+  xDomainMin,
+  xDomainMax,
+  yDomainMin,
+  yDomainMax,
+  showBrush = false,
+  onBrushChange,
 }) => {
   // Transform metrics into chart data points for the selected metric
   const chartData: ChartDataPoint[] = React.useMemo(() => {
@@ -92,11 +105,29 @@ export const RewardChart: React.FC<MetricChartProps> = ({
   }
 
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <>
+      {showBrush && (
+        <style>{`
+          .brush-slider .recharts-brush-slide {
+            fill: #3f72af !important;
+            fill-opacity: 0.15 !important;
+            rx: 2 !important;
+            height: 4px !important;
+            transform: translateY(7px);
+          }
+          .brush-slider > rect:first-child {
+            fill: #e5e7eb !important;
+            rx: 2 !important;
+            height: 4px !important;
+            transform: translateY(7px);
+          }
+        `}</style>
+      )}
+      <ResponsiveContainer width="100%" height="100%">
       <LineChart
         data={chartData}
         onClick={handleChartClick}
-        margin={{ top: 10, right: 15, left: 10, bottom: 10 }}
+        margin={{ top: 10, right: 15, left: 10, bottom: showBrush ? 5 : 10 }}
         style={{ cursor: "crosshair", outline: "none" }}
         accessibilityLayer={false}
       >
@@ -104,7 +135,11 @@ export const RewardChart: React.FC<MetricChartProps> = ({
         <XAxis
           dataKey="step"
           type="number"
-          domain={["dataMin", "dataMax"]}
+          domain={[
+            xDomainMin !== undefined ? xDomainMin : "dataMin",
+            xDomainMax !== undefined ? xDomainMax : "dataMax",
+          ]}
+          allowDataOverflow={xDomainMin !== undefined || xDomainMax !== undefined}
           allowDecimals={false}
           tick={{ fontSize: 11, fill: "#737373", fontFamily: "inherit" }}
           tickLine={{ stroke: "#d4d4d4" }}
@@ -112,8 +147,8 @@ export const RewardChart: React.FC<MetricChartProps> = ({
           interval="preserveStartEnd"
           ticks={(() => {
             if (chartData.length === 0) return undefined;
-            const min = chartData[0].step;
-            const max = chartData[chartData.length - 1].step;
+            const min = xDomainMin ?? chartData[0].step;
+            const max = xDomainMax ?? chartData[chartData.length - 1].step;
             const result: number[] = [];
             const start = Math.ceil(min / 5) * 5;
             for (let i = start; i <= max; i += 5) {
@@ -122,7 +157,7 @@ export const RewardChart: React.FC<MetricChartProps> = ({
             if (result.length === 0 || result[0] !== min) result.unshift(min);
             return result;
           })()}
-          label={{
+          label={showBrush ? undefined : {
             value: "Step",
             position: "insideBottomRight",
             offset: -5,
@@ -134,7 +169,11 @@ export const RewardChart: React.FC<MetricChartProps> = ({
           tick={{ fontSize: 11, fill: "#737373", fontFamily: "inherit" }}
           tickLine={{ stroke: "#d4d4d4" }}
           axisLine={{ stroke: "#d4d4d4" }}
-          domain={["auto", "auto"]}
+          domain={[
+            yDomainMin !== undefined ? yDomainMin : "auto",
+            yDomainMax !== undefined ? yDomainMax : "auto",
+          ]}
+          allowDataOverflow={yDomainMin !== undefined || yDomainMax !== undefined}
           padding={{ top: 10, bottom: 10 }}
         />
         <Tooltip
@@ -188,6 +227,40 @@ export const RewardChart: React.FC<MetricChartProps> = ({
           />
         )}
 
+        {showBrush && chartData.length > 1 && (
+          <Brush
+            dataKey="step"
+            height={18}
+            stroke="none"
+            fill="transparent"
+            travellerWidth={14}
+            tickFormatter={() => ""}
+            className="brush-slider"
+            traveller={(props: any) => {
+              const { x, y, width, height } = props;
+              const cx = x + width / 2;
+              const cy = y + height / 2;
+              return (
+                <g cursor="ew-resize">
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={7}
+                    fill="#3f72af"
+                    stroke="white"
+                    strokeWidth={2}
+                  />
+                </g>
+              );
+            }}
+            onChange={(range: any) => {
+              if (onBrushChange && range) {
+                onBrushChange(range.startIndex, range.endIndex);
+              }
+            }}
+          />
+        )}
+
         <Line
           type="monotone"
           dataKey="value"
@@ -221,6 +294,7 @@ export const RewardChart: React.FC<MetricChartProps> = ({
         />
       </LineChart>
     </ResponsiveContainer>
+    </>
   );
 };
 
