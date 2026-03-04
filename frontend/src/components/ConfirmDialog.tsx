@@ -1,3 +1,5 @@
+"use client";
+
 import React from "react";
 import { WarningIcon } from "./icons";
 import { Modal } from "./ui";

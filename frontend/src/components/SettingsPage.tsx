@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../config/api";
 import { useAuth } from "../contexts/AuthContext";

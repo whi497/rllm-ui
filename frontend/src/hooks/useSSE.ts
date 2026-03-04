@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL, apiFetch } from '../config/api';
 

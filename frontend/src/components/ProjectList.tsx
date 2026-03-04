@@ -1,5 +1,7 @@
+"use client";
+
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
 import { SearchIcon, WarningIcon, BarChartIcon } from './icons';
 import { Spinner, EmptyState } from './ui';
 import { ActionMenu } from './ActionMenu';
@@ -35,7 +37,7 @@ export const ProjectList: React.FC = () => {
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
-  const navigate = useNavigate();
+  const router = useRouter();
 
   const initialLoadDone = useRef(false);
 
@@ -246,7 +248,7 @@ export const ProjectList: React.FC = () => {
                 <div
                   key={project.id}
                   onClick={() => {
-                    if (!isRenaming) navigate(`/project/${project.id}`);
+                    if (!isRenaming) router.push(`/project/${project.id}`);
                   }}
                   className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-gray-300 hover:shadow-sm transition-all group relative cursor-pointer"
                 >

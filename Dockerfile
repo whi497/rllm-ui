@@ -1,16 +1,29 @@
-# Stage 1: Build frontend
-FROM node:20-alpine AS frontend-build
+# Stage 1: Install dependencies
+FROM node:20-alpine AS deps
 WORKDIR /app
-COPY frontend/package*.json ./
+COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
-COPY frontend/ ./
+
+# Stage 2: Build the Next.js app
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY frontend/ .
 RUN npm run build
 
-# Stage 2: Python API + static files
-FROM python:3.11-slim
+# Stage 3: Run the standalone Next.js server
+FROM node:20-alpine AS runner
 WORKDIR /app
-COPY api/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY api/ .
-COPY --from=frontend-build /app/dist ./static
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-3000} --proxy-headers --forwarded-allow-ips='*' --workers ${WEB_CONCURRENCY:-4}
+ENV NODE_ENV=production
+ENV PORT=3000
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+
+USER nextjs
+EXPOSE 3000
+CMD ["node", "server.js"]

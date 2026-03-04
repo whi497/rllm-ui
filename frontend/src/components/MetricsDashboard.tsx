@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useMemo } from "react";
 import type { Metric } from "../hooks/useSSE";
 import { RewardChart, getAvailableMetrics } from "./RewardChart";

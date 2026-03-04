@@ -1,5 +1,7 @@
+"use client";
+
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { useParams } from "react-router-dom";
+import { useParams } from "next/navigation";
 import {
   LineChart,
   Line,
@@ -57,7 +59,8 @@ function groupMetricsByPrefix(metricKeys: string[]): Map<string, string[]> {
 }
 
 export const ProjectOverview: React.FC = () => {
-  const { projectId } = useParams<{ projectId: string }>();
+  const params = useParams<{ projectId: string }>();
+  const projectId = params.projectId as string;
   const { hiddenExperiments, colorOverrides } = useExperimentVisibility();
 
   const [sessions, setSessions] = useState<Session[]>([]);

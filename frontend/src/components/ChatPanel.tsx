@@ -1,5 +1,7 @@
+"use client";
+
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import { apiFetch } from "../config/api";
 import { useAuth } from "../contexts/AuthContext";
@@ -41,7 +43,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const [apiKeyError, setApiKeyError] = useState<"missing" | "invalid" | null>(null);
 
   const { config } = useAuth();
-  const navigate = useNavigate();
+  const router = useRouter();
   const isCloud = config?.auth_required ?? false;
 
   /** Detect API-key-related errors and return a category, or null. */
@@ -396,7 +398,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     ? "To use the agent, add your Anthropic API key in "
                     : "Check or update your Anthropic API key in "}
                   <button
-                    onClick={() => navigate("/settings")}
+                    onClick={() => router.push("/settings")}
                     className="underline font-medium hover:text-red-800"
                   >
                     Settings

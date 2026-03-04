@@ -2,6 +2,8 @@
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/.next/
+frontend/next-env.d.ts
 
 # Backend
 api/rllm_ui.db

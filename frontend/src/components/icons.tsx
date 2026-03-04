@@ -1,3 +1,5 @@
+"use client";
+
 // Re-export Lucide icons for consistent usage across the app
 export {
   Search as SearchIcon,

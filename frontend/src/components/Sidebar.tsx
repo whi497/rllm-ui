@@ -1,5 +1,8 @@
+"use client";
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
 import {
   FolderOpenIcon,
   SettingsIcon,
@@ -40,31 +43,31 @@ interface ProjectData {
 }
 
 export const Sidebar: React.FC = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
+  const router = useRouter();
+  const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [projects, setProjects] = useState<ProjectData[]>([]);
   const [panelWidth, setPanelWidth] = useState(220);
   const isDragging = useRef(false);
 
   const isProjectsActive =
-    location.pathname === "/" ||
-    location.pathname.startsWith("/runs") ||
-    location.pathname.startsWith("/project");
+    pathname === "/" ||
+    pathname.startsWith("/runs") ||
+    pathname.startsWith("/project");
 
-  const isSettingsActive = location.pathname === "/settings";
+  const isSettingsActive = pathname === "/settings";
 
   // Are we on a project overview page?
   const projectOverviewMatch = useMemo(() => {
-    const match = location.pathname.match(/^\/project\/(.+)$/);
+    const match = pathname.match(/^\/project\/(.+)$/);
     return match ? match[1] : null; // This is now the project ID
-  }, [location.pathname]);
+  }, [pathname]);
 
   // Are we on a single run page?
   const activeSessionId = useMemo(() => {
-    const match = location.pathname.match(/^\/runs\/(.+)$/);
+    const match = pathname.match(/^\/runs\/(.+)$/);
     return match ? match[1] : null;
-  }, [location.pathname]);
+  }, [pathname]);
 
   // The project to show in experiments panel (from overview or run)
   const activeProject = useMemo(() => {
@@ -148,7 +151,7 @@ export const Sidebar: React.FC = () => {
   }, [isCollapsed]);
 
   const handleExperimentClick = (sessionId: string) => {
-    navigate(`/runs/${sessionId}`);
+    router.push(`/runs/${sessionId}`);
   };
 
   // Show experiments panel only on project overview (not on single run)
@@ -170,7 +173,7 @@ export const Sidebar: React.FC = () => {
           className={`h-14 flex items-center ${isCollapsed ? "justify-center px-1" : "justify-between pl-4 pr-2"}`}
         >
           {!isCollapsed && (
-            <Link to="/">
+            <Link href="/">
               <img
                 src="/rllm_logo_black.png"
                 alt="rLLM"
@@ -194,7 +197,7 @@ export const Sidebar: React.FC = () => {
         {/* Navigation */}
         <nav className="flex-1 py-2 px-2">
           <Link
-            to="/"
+            href="/"
             className={`
               flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
               transition-colors duration-150
@@ -211,7 +214,7 @@ export const Sidebar: React.FC = () => {
             {!isCollapsed && <span>Projects</span>}
           </Link>
           <Link
-            to="/settings"
+            href="/settings"
             className={`
               flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
               transition-colors duration-150
@@ -311,7 +314,7 @@ const ExperimentsPanel: React.FC<{
   onExperimentClick: (sessionId: string) => void;
   onRefresh: () => void;
 }> = ({ project, onExperimentClick, onRefresh }) => {
-  const navigate = useNavigate();
+  const router = useRouter();
   const { hiddenExperiments, toggleExperiment, resetVisibility, hideAll, pinnedExperiments, togglePin, colorOverrides, updateColor } = useExperimentVisibility();
 
   // Project rename state
@@ -364,7 +367,7 @@ const ExperimentsPanel: React.FC<{
       if (res.ok) {
         setDeleteConfirm(null);
         onRefresh();
-        navigate("/");
+        router.push("/");
       }
     } catch { /* ignore */ }
   };
@@ -397,7 +400,7 @@ const ExperimentsPanel: React.FC<{
         onRefresh();
         // If last session, go home
         if (project.sessions.length <= 1) {
-          navigate("/");
+          router.push("/");
         }
       }
     } catch { /* ignore */ }

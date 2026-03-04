@@ -1,5 +1,7 @@
+"use client";
+
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "next/navigation";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "../../config/api";
 
@@ -20,7 +22,7 @@ const GoogleIcon = () => (
 
 export const LoginPage: React.FC = () => {
   const { login, register, config } = useAuth();
-  const navigate = useNavigate();
+  const router = useRouter();
   const oauthProviders = config?.oauth_providers ?? [];
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState("");
@@ -42,7 +44,7 @@ export const LoginPage: React.FC = () => {
     if (result) {
       setError(result);
     } else {
-      navigate("/");
+      router.push("/");
     }
   };
 

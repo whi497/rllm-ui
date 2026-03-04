@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useRef } from "react";
 import { MoreVertIcon } from "../icons";
 import { useClickOutside } from "./useClickOutside";

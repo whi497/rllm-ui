@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: #fafbfc;
+  --color-surface: #ffffff;
+  --color-border: #e5e7eb;
+  --color-border-light: #f1f3f5;
+  --color-text: #111827;
+  --color-text-secondary: #6b7280;
+  --color-text-tertiary: #9ca3af;
+  --color-accent: #3f72af;
+  --color-accent-hover: #345f94;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Focus states */
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Code blocks */
+pre, code {
+  font-family: 'IBM Plex Mono', 'SF Mono', Monaco, monospace;
+}
+
+/* Input base styles */
+input, textarea, select {
+  font-family: inherit;
+}
+
+/* Override Prism theme font to match our codebase */
+code[class*="language-"],
+pre[class*="language-"] {
+  font-family: 'IBM Plex Mono', 'SF Mono', Monaco, monospace !important;
+}
+
+/* Neutralize Prism theme inside prose containers (ChatPanel markdown).
+   Prism sets color:black + text-shadow:0 1px white on language-* elements,
+   which clashes with prose's dark code blocks. These overrides let the
+   typography plugin control code styling. Prism still works in WorkflowDiagram
+   since it doesn't use .prose. */
+.prose code[class*="language-"],
+.prose pre[class*="language-"] {
+  color: inherit !important;
+  text-shadow: none !important;
+  background: none !important;
+}
+
+/* Remove focus outline from chart elements */
+.recharts-wrapper,
+.recharts-wrapper *,
+.recharts-surface {
+  outline: none !important;
+}

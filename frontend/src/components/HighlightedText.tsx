@@ -1,3 +1,5 @@
+"use client";
+
 import React from 'react';
 
 interface HighlightedTextProps {
@@ -6,7 +8,7 @@ interface HighlightedTextProps {
     /** Additional terms to highlight (e.g., stemmed terms from API) */
     searchTerms?: string[];
     isCurrentMatch?: boolean;
-    matchRef?: React.RefObject<HTMLSpanElement>;
+    matchRef?: React.RefObject<HTMLSpanElement | null>;
     /** Which occurrence within this text block is current (0-indexed).
      *  When undefined and isCurrentMatch=true, ALL matches are orange (backward-compatible).
      *  When defined, only that specific occurrence is orange. */

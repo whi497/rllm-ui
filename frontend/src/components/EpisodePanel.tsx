@@ -1,3 +1,5 @@
+"use client";
+
 import React, {
   useState,
   useEffect,
@@ -1129,7 +1131,7 @@ interface EpisodeCardProps {
   searchQuery: string;
   searchTerms: string[];
   currentMatch: MatchLocation | null;
-  currentMatchRef: React.RefObject<HTMLSpanElement>;
+  currentMatchRef: React.RefObject<HTMLSpanElement | null>;
 }
 
 const EpisodeCard: React.FC<EpisodeCardProps> = ({
@@ -1222,7 +1224,7 @@ interface EpisodeBatchCardProps {
   searchQuery: string;
   searchTerms: string[];
   currentMatch: MatchLocation | null;
-  currentMatchRef: React.RefObject<HTMLSpanElement>;
+  currentMatchRef: React.RefObject<HTMLSpanElement | null>;
 }
 
 const EpisodeBatchCard: React.FC<EpisodeBatchCardProps> = ({
@@ -1315,7 +1317,7 @@ interface TaskGroupBatchCardProps {
   searchQuery?: string;
   searchTerms?: string[];
   currentGroupMatch?: GroupMatchLocation | null;
-  currentGroupMatchRef?: React.RefObject<HTMLSpanElement>;
+  currentGroupMatchRef?: React.RefObject<HTMLSpanElement | null>;
   preloadedGroupData?: Map<string, TrajectoryGroup>;
   taskText?: string;
 }
@@ -1402,7 +1404,7 @@ interface TrajectoryCardProps {
   searchQuery: string;
   searchTerms: string[];
   currentMatch: MatchLocation | null;
-  currentMatchRef: React.RefObject<HTMLSpanElement>;
+  currentMatchRef: React.RefObject<HTMLSpanElement | null>;
 }
 
 const TrajectoryCard: React.FC<TrajectoryCardProps> = ({
@@ -1468,7 +1470,7 @@ interface StepViewProps {
   searchQuery: string;
   searchTerms: string[];
   currentMatch: MatchLocation | null;
-  currentMatchRef: React.RefObject<HTMLSpanElement>;
+  currentMatchRef: React.RefObject<HTMLSpanElement | null>;
 }
 
 const StepView: React.FC<StepViewProps> = ({
@@ -1546,7 +1548,7 @@ interface TrajectoryGroupCardProps {
   searchQuery?: string;
   searchTerms?: string[];
   currentGroupMatch?: GroupMatchLocation | null;
-  currentGroupMatchRef?: React.RefObject<HTMLSpanElement>;
+  currentGroupMatchRef?: React.RefObject<HTMLSpanElement | null>;
   preloadedData?: TrajectoryGroup;
 }
 
@@ -1692,7 +1694,7 @@ interface GroupTrajectoryCardProps {
   groupId?: string;
   trajectoryIndex?: number;
   currentGroupMatch?: GroupMatchLocation | null;
-  currentGroupMatchRef?: React.RefObject<HTMLSpanElement>;
+  currentGroupMatchRef?: React.RefObject<HTMLSpanElement | null>;
 }
 
 const GroupTrajectoryCard: React.FC<GroupTrajectoryCardProps> = ({
@@ -1765,7 +1767,7 @@ interface GroupStepViewProps {
   groupId?: string;
   trajectoryIndex?: number;
   currentGroupMatch?: GroupMatchLocation | null;
-  currentGroupMatchRef?: React.RefObject<HTMLSpanElement>;
+  currentGroupMatchRef?: React.RefObject<HTMLSpanElement | null>;
 }
 
 const GroupStepView: React.FC<GroupStepViewProps> = ({
@@ -1840,7 +1842,7 @@ interface SortOption {
 }
 
 const SortMenu: React.FC<{
-  menuRef: React.RefObject<HTMLDivElement>;
+  menuRef: React.RefObject<HTMLDivElement | null>;
   isOpen: boolean;
   onToggle: () => void;
   currentMode: string;

@@ -1,5 +1,7 @@
+"use client";
+
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useRouter } from "next/navigation";
 import { useMetricsSSE, useLogsSSE } from "../hooks/useSSE";
 import { RewardChart, getAvailableMetrics } from "./RewardChart";
 import { EpisodePanel } from "./EpisodePanel";
@@ -96,8 +98,9 @@ interface TrajectoryStep {
 }
 
 export const TrainingRunDetail: React.FC = () => {
-  const { sessionId } = useParams<{ sessionId: string }>();
-  const navigate = useNavigate();
+  const params = useParams<{ sessionId: string }>();
+  const sessionId = params.sessionId as string;
+  const router = useRouter();
   const { colorOverrides, updateColor } = useExperimentVisibility();
 
   const [session, setSession] = useState<Session | null>(null);
@@ -302,7 +305,7 @@ export const TrainingRunDetail: React.FC = () => {
         method: "DELETE",
       });
       if (res.ok) {
-        navigate(`/project/${session.project_id}`);
+        router.push(`/project/${session.project_id}`);
       }
     } catch { /* ignore */ }
   };
@@ -358,7 +361,7 @@ export const TrainingRunDetail: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={() =>
-                navigate(`/project/${session.project_id}`)
+                router.push(`/project/${session.project_id}`)
               }
               className="p-1 hover:bg-layer-2 text-gray-400 hover:text-gray-700 rounded-md transition-colors"
               title="Back to project overview"

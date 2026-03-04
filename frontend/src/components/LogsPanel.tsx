@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Ansi from "ansi-to-react";
 import type { LogEntry } from "../hooks/useSSE";
