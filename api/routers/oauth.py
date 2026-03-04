@@ -24,10 +24,17 @@ OAUTH_STATE_COOKIE = "oauth_state"
 
 
 def _get_frontend_url(request: Request) -> str:
-    """Derive the frontend URL from CORS_ORIGINS or fall back to request base URL."""
+    """Derive the public frontend URL from proxy headers or env vars."""
+    # Proxy headers forwarded by Next.js rewrite
+    forwarded_host = request.headers.get("x-forwarded-host")
+    if forwarded_host:
+        proto = request.headers.get("x-forwarded-proto", "https")
+        return f"{proto}://{forwarded_host}"
+    # Fall back to CORS_ORIGINS
     cors_origins = os.environ.get("CORS_ORIGINS", "")
     if cors_origins:
         return cors_origins.split(",")[0].strip()
+    # Fall back to request context
     origin = request.headers.get("origin")
     if origin:
         return origin
