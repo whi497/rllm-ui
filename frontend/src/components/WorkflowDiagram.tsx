@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-python';
 import 'prismjs/themes/prism.css';
+import './WorkflowDiagram.css';
 import { EmptyState, CollapsibleSection } from './ui';
 import { HighlightedText, countMatches } from './HighlightedText';
 import { SearchIcon } from './icons';
