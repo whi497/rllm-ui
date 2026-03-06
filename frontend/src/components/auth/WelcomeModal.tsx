@@ -23,10 +23,8 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
 
-  const envLine = `RLLM_API_KEY=${apiKey}`;
-
   const handleCopy = () => {
-    navigator.clipboard.writeText(envLine);
+    navigator.clipboard.writeText(apiKey);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -55,7 +53,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       {/* API key display + copy */}
       <div className="flex items-center gap-2 mb-4">
         <div className="flex-1 min-w-0 px-3 py-2 bg-white border border-gray-300 rounded-lg">
-          <code className="text-sm text-gray-700 truncate block">{envLine}</code>
+          <code className="text-sm text-gray-700 truncate block">{apiKey}</code>
         </div>
         <button
           onClick={handleCopy}
@@ -63,6 +61,15 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         >
           {copied ? "Copied!" : "Copy"}
         </button>
+      </div>
+
+      {/* Usage instructions */}
+      <div className="text-sm text-gray-500 mb-4 space-y-1">
+        <p>To authenticate, either:</p>
+        <ul className="list-disc list-inside space-y-0.5 text-xs text-gray-400">
+          <li>Run <code className="bg-gray-100 px-1 rounded">rllm login</code> and paste the key</li>
+          <li>Set <code className="bg-gray-100 px-1 rounded">RLLM_API_KEY</code> in your environment</li>
+        </ul>
       </div>
 
       {/* Close button */}
