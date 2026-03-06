@@ -14,6 +14,7 @@ import {
   VisibilityOffIcon,
   SearchIcon,
   PushPinIcon,
+  ClipboardCheckIcon,
 } from "./icons";
 import { ActionMenu } from "./ActionMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -56,6 +57,7 @@ export const Sidebar: React.FC = () => {
     pathname.startsWith("/project");
 
   const isSettingsActive = pathname === "/settings";
+  const isEvaluationActive = pathname.startsWith("/evaluation");
 
   // Are we on a project overview page?
   const projectOverviewMatch = useMemo(() => {
@@ -113,7 +115,7 @@ export const Sidebar: React.FC = () => {
 
   // Auto-collapse main sidebar when navigating away from home (project overview, run, or settings)
   useEffect(() => {
-    if (projectOverviewMatch || activeSessionId || isSettingsActive) {
+    if (projectOverviewMatch || activeSessionId || isSettingsActive || isEvaluationActive) {
       setIsCollapsed(true);
     } else {
       setIsCollapsed(false);
@@ -212,6 +214,23 @@ export const Sidebar: React.FC = () => {
           >
             <FolderOpenIcon size={18} className="flex-shrink-0" />
             {!isCollapsed && <span>Projects</span>}
+          </Link>
+          <Link
+            href="/evaluation"
+            className={`
+              flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
+              transition-colors duration-150
+              ${isCollapsed ? "justify-center" : ""}
+              ${
+                isEvaluationActive
+                  ? "bg-accent-50 text-accent-700"
+                  : "text-gray-600 hover:bg-layer-1 hover:text-gray-900"
+              }
+            `}
+            title={isCollapsed ? "Evaluation" : undefined}
+          >
+            <ClipboardCheckIcon size={18} className="flex-shrink-0" />
+            {!isCollapsed && <span>Evaluation</span>}
           </Link>
           <Link
             href="/settings"

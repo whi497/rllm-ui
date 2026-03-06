@@ -46,7 +46,7 @@ export const ProjectList: React.FC = () => {
     setError(null);
 
     try {
-      const response = await apiFetch("/api/sessions");
+      const response = await apiFetch("/api/sessions?type=training");
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);

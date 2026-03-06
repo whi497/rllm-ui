@@ -21,6 +21,11 @@ import SearchBar from "./SearchBar";
 import { apiFetch } from "../config/api";
 
 interface TrajectoryStep {
+  // eval fields (types.Step)
+  input?: any;
+  output?: any;
+  metadata?: Record<string, any>;
+  // training fields (agents.AgentStep)
   observation?: any;
   thought?: string;
   action?: any;
@@ -43,6 +48,10 @@ interface Trajectory {
   task?: Record<string, any>;
   reward: number;
   info?: Record<string, any>;
+  input?: Record<string, any>;
+  output?: any;
+  signals?: Record<string, number>;
+  metadata?: Record<string, any>;
   steps: TrajectoryStep[];
 }
 
@@ -56,6 +65,8 @@ interface Episode {
   trajectories: Trajectory[];
   metrics?: Record<string, any>;
   info?: Record<string, any>;
+  metadata?: Record<string, any>;
+  artifacts?: Record<string, any>;
   created_at: string;
 }
 
@@ -80,6 +91,7 @@ interface EpisodePanelProps {
   loading?: boolean;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
+  hideStepLabel?: boolean;
 }
 
 interface SearchResponse {
@@ -276,6 +288,7 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
   sessionId,
   loading = false,
   viewMode: externalViewMode,
+  hideStepLabel = false,
 }) => {
   const [expandedEpisodes, setExpandedEpisodes] = useState<Set<string>>(
     new Set(),
@@ -1040,20 +1053,22 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
           <div className="divide-y divide-gray-100">
             {selectedStep !== null && (
               <div className="px-4 py-2.5 bg-layer-1 border-b border-gray-200 flex items-center gap-3 sticky top-0 z-10">
-                <div className="flex flex-col flex-shrink-0">
-                  <span className="text-sm font-medium text-gray-900">
-                    {committedQuery.trim()
-                      ? `${displayEpisodes.length} result${displayEpisodes.length !== 1 ? "s" : ""}`
-                      : `Step ${selectedStep}`}
-                  </span>
-                  {!committedQuery.trim() && (
-                    <span className="text-[11px] leading-tight text-gray-400">
-                      {sortedBatches.length} task
-                      {sortedBatches.length !== 1 ? "s" : ""} · {displayEpisodes.length} episode
-                      {displayEpisodes.length !== 1 ? "s" : ""}
+                {!hideStepLabel && (
+                  <div className="flex flex-col flex-shrink-0">
+                    <span className="text-sm font-medium text-gray-900">
+                      {committedQuery.trim()
+                        ? `${displayEpisodes.length} result${displayEpisodes.length !== 1 ? "s" : ""}`
+                        : `Step ${selectedStep}`}
                     </span>
-                  )}
-                </div>
+                    {!committedQuery.trim() && (
+                      <span className="text-[11px] leading-tight text-gray-400">
+                        {sortedBatches.length} task
+                        {sortedBatches.length !== 1 ? "s" : ""} · {displayEpisodes.length} episode
+                        {displayEpisodes.length !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                  </div>
+                )}
                 {viewMode === "episodes" && (
                   <>
                     <SearchBar
@@ -1939,11 +1954,14 @@ function getVisibleFields(
 
   const fieldOrder = [
     "observation",
+    "input",
     "thought",
     "model_response",
+    "output",
     "action",
     "chat_completions",
     "info",
+    "metadata",
   ];
 
   fieldOrder.forEach((key) => {
@@ -1981,11 +1999,14 @@ function getFieldConfig(
   };
   const configs: Record<string, any> = {
     observation: { label: "Observation", ...style },
+    input: { label: "Input", ...style },
     thought: { label: "Thought", ...style },
     model_response: { label: "Response", ...style },
+    output: { label: "Output", ...style },
     action: { label: "Action", ...style },
     chat_completions: { label: "Chat Completions", ...style },
     info: { label: "Info", ...style },
+    metadata: { label: "Metadata", ...style },
   };
 
   return (
