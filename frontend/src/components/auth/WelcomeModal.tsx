@@ -46,7 +46,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
 
       {/* Warning text */}
       <p className="text-sm text-gray-700 mb-1">
-        This key will <strong>ONLY</strong> appear once. Make sure to copy it somewhere <em>safe</em> now.
+        This key will only appear once. Copy it down somewhere safe.
       </p>
       <p className="text-sm text-gray-500 mb-4">{subtitle}</p>
 
