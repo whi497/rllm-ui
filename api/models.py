@@ -294,4 +294,4 @@ class EvalResultCreate(BaseModel):
 
 class EvalResultResponse(EvalResultCreate):
     id: str
-    created_at: str
+    created_at: datetime
