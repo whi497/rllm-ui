@@ -2,30 +2,35 @@
 
 from auth import CurrentUser
 from fastapi import APIRouter, HTTPException, Query, Request
-from models import EpisodeCreate, EpisodeResponse, EpisodeSearchResponse
+from models import AgentEpisode, AgentStep, Episode, EpisodeResponse, EpisodeSearchResponse, Step
+
+from datastore.base import extract_searchable_text
 
 router = APIRouter(prefix="/api", tags=["episodes"])
 
 
 @router.post("/episodes", response_model=EpisodeResponse)
-def create_episode(request: Request, episode: EpisodeCreate, user: CurrentUser):
+async def create_episode(request: Request, user: CurrentUser):
     """Receive and store episode data with trajectories."""
-    store = request.app.state.store
+    body = await request.json()
+    session_type = body.get("session_type", "training")
 
-    # Check if session exists (store handles this internally or we let FK fail?
-    # SQLiteStore doesn't strictly enforce in create logic unless we added it.
-    # But usually we want to return 404 if session missing.
-    # The original code checked explicitly. DataStore should optionally check or we rely on logic.
-    # Let's assume store handles basic validation, but SQLiteStore didn't explicitly check session existence in append_episode.
-    # We can add check here if we want strictness, via store.get_session.
+    if session_type == "eval":
+        episode = Episode(**body)
+        step_model = Step
+    else:
+        episode = AgentEpisode(**body)
+        step_model = AgentStep
+
+    store = request.app.state.store
 
     session = store.get_session(episode.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Pass the full dict
     episode_data = episode.model_dump(mode="json")
-    store.append_episode(episode.session_id, episode_data)
+    search_text = extract_searchable_text(episode_data, step_model)
+    store.append_episode(episode.session_id, episode_data, search_text=search_text)
 
     return store.get_episode(episode.episode_id)
 

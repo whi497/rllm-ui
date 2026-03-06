@@ -147,10 +147,35 @@ class PostgresStore(DataStore):
                         source_metadata JSONB,
                         color TEXT,
                         status TEXT DEFAULT 'running',
+                        session_type TEXT DEFAULT 'training',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         completed_at TIMESTAMP,
                         last_heartbeat_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
+                """)
+
+                # Migration: add session_type column to existing sessions tables
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE sessions ADD COLUMN IF NOT EXISTS session_type TEXT DEFAULT 'training';
+                    EXCEPTION WHEN others THEN NULL;
+                    END $$;
+                """)
+
+                # Migration: add artifacts column to episodes table
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE episodes ADD COLUMN IF NOT EXISTS artifacts JSONB;
+                    EXCEPTION WHEN others THEN NULL;
+                    END $$;
+                """)
+
+                # Migration: add metadata column to episodes table
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE episodes ADD COLUMN IF NOT EXISTS metadata JSONB;
+                    EXCEPTION WHEN others THEN NULL;
+                    END $$;
                 """)
 
                 # Metrics table
@@ -261,12 +286,35 @@ class PostgresStore(DataStore):
                     ON chat_messages(chat_session_id)
                 """)
 
+                # Eval results table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS eval_results (
+                        id TEXT PRIMARY KEY,
+                        session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+                        dataset_name TEXT NOT NULL,
+                        model TEXT NOT NULL,
+                        agent TEXT NOT NULL,
+                        score REAL NOT NULL,
+                        total INTEGER NOT NULL,
+                        correct INTEGER NOT NULL,
+                        errors INTEGER NOT NULL,
+                        signal_averages JSONB,
+                        items JSONB,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_eval_results_session_id
+                    ON eval_results(session_id)
+                """)
+
                 conn.commit()
 
     def reset(self):
         """Reset the data store by dropping and recreating all tables."""
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
+                cursor.execute("DROP TABLE IF EXISTS eval_results CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS user_settings CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS chat_messages CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS chat_sessions CASCADE")
@@ -483,7 +531,7 @@ class PostgresStore(DataStore):
 
     # ── Session methods ──────────────────────────────────────────────
 
-    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any], owner_id: str | None = None) -> str:
+    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any], owner_id: str | None = None, session_type: str = "training") -> str:
         """Create a new training session."""
         project_id = self.get_or_create_project(project, owner_id=owner_id)
         session_id = str(uuid.uuid4())
@@ -491,10 +539,10 @@ class PostgresStore(DataStore):
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO sessions (id, project_id, experiment, config, source_metadata)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO sessions (id, project_id, experiment, config, source_metadata, session_type)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (session_id, project_id, experiment, json.dumps(config), json.dumps(source_metadata)),
+                    (session_id, project_id, experiment, json.dumps(config), json.dumps(source_metadata), session_type),
                 )
                 conn.commit()
         return session_id
@@ -517,7 +565,7 @@ class PostgresStore(DataStore):
                     return dict(row)
         return None
 
-    def append_episode(self, session_id: str, episode_data: dict[str, Any]):
+    def append_episode(self, session_id: str, episode_data: dict[str, Any], search_text: str | None = None):
         """Append an episode to a session."""
         ep_id = episode_data.get("episode_id")
         step = episode_data.get("step")
@@ -527,17 +575,20 @@ class PostgresStore(DataStore):
         trajectories = json.dumps(episode_data.get("trajectories", []))
         metrics = json.dumps(episode_data.get("metrics"))
         info = json.dumps(episode_data.get("info"))
+        artifacts = json.dumps(episode_data.get("artifacts"))
+        metadata = json.dumps(episode_data.get("metadata"))
 
-        search_text = extract_searchable_text(episode_data)
+        if search_text is None:
+            search_text = extract_searchable_text(episode_data)
 
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO episodes (id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, search_text)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO episodes (id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, artifacts, metadata, search_text)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (ep_id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, search_text),
+                    (ep_id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, artifacts, metadata, search_text),
                 )
                 conn.commit()
 
@@ -883,7 +934,7 @@ class PostgresStore(DataStore):
                     project_ids = [p["id"] for p in project_rows]
                     if project_ids:
                         cursor.execute(
-                            "SELECT id, project_id, experiment, status, created_at, completed_at FROM sessions WHERE project_id = ANY(%s) ORDER BY created_at DESC",
+                            "SELECT id, project_id, experiment, status, created_at, completed_at FROM sessions WHERE project_id = ANY(%s) AND session_type != 'eval' ORDER BY created_at DESC",
                             (project_ids,),
                         )
                     else:
@@ -893,7 +944,7 @@ class PostgresStore(DataStore):
                     project_rows = cursor.fetchall()
 
                     cursor.execute(
-                        "SELECT id, project_id, experiment, status, created_at, completed_at FROM sessions ORDER BY created_at DESC"
+                        "SELECT id, project_id, experiment, status, created_at, completed_at FROM sessions WHERE session_type != 'eval' ORDER BY created_at DESC"
                     )
                 session_rows = cursor.fetchall()
 
@@ -1015,3 +1066,48 @@ class PostgresStore(DataStore):
                 )
                 conn.commit()
                 return dict(row)
+
+    # ── Eval result methods ──────────────────────────────────────
+
+    def create_eval_result(self, data: dict[str, Any]) -> dict[str, Any]:
+        result_id = str(uuid.uuid4())
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO eval_results (id, session_id, dataset_name, model, agent, score, total, correct, errors, signal_averages, items)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+                    (result_id, data["session_id"], data["dataset_name"], data["model"], data["agent"],
+                     data["score"], data["total"], data["correct"], data["errors"],
+                     json.dumps(data.get("signal_averages", {})), json.dumps(data.get("items", []))),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+                return dict(row)
+
+    def get_eval_results(self, session_id: str | None = None) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                if session_id:
+                    cursor.execute("SELECT * FROM eval_results WHERE session_id = %s ORDER BY created_at DESC", (session_id,))
+                else:
+                    cursor.execute("SELECT * FROM eval_results ORDER BY created_at DESC")
+                return [dict(row) for row in cursor.fetchall()]
+
+    def get_eval_result(self, result_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM eval_results WHERE id = %s", (result_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+
+    def get_eval_results_by_project(self, project_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """SELECT er.* FROM eval_results er
+                    JOIN sessions s ON er.session_id = s.id
+                    WHERE s.project_id = %s
+                    ORDER BY er.created_at DESC""",
+                    (project_id,),
+                )
+                return [dict(row) for row in cursor.fetchall()]

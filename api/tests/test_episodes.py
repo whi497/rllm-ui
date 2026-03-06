@@ -13,6 +13,16 @@ def test_session(client):
     return response.json()
 
 
+@pytest.fixture
+def eval_session(client):
+    """Create a test eval session."""
+    response = client.post(
+        "/api/sessions",
+        json={"project": "test-project", "experiment": "eval-run", "session_type": "eval"},
+    )
+    return response.json()
+
+
 def test_post_episode_stores_trajectory(client, test_session):
     """POST /api/episodes should store episode with trajectories including all fields."""
     episode_data = {
@@ -265,3 +275,139 @@ def test_search_episodes_with_session_filter(client, test_session):
     assert response.status_code == 200
     results = response.json()
     assert len(results["episodes"]) == 0
+
+
+def test_post_eval_episode_preserves_all_fields(client, eval_session):
+    """POST /api/episodes with session_type=eval should preserve types.Step fields."""
+    episode_data = {
+        "session_id": eval_session["id"],
+        "session_type": "eval",
+        "step": 0,
+        "episode_id": "eval-task1:0",
+        "task": {"question": "What is 2+2?", "ground_truth": 4},
+        "is_correct": True,
+        "metadata": {"model": "gpt-4o-mini", "agent": "math_agent"},
+        "artifacts": {"answer": "The answer is 4"},
+        "trajectories": [
+            {
+                "uid": "traj-uuid-1",
+                "name": "solver",
+                "reward": 1.0,
+                "signals": {"accuracy": 1.0},
+                "steps": [
+                    {
+                        "id": "step-uuid-1",
+                        "input": "What is 2+2?",
+                        "output": "The answer is \\boxed{4}",
+                        "reward": 0.0,
+                        "done": True,
+                        "metadata": {"token_count": 42},
+                    }
+                ],
+            }
+        ],
+    }
+
+    response = client.post("/api/episodes", json=episode_data)
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["id"] == "eval-task1:0"
+    assert data["artifacts"] == {"answer": "The answer is 4"}
+    assert data["metadata"] == {"model": "gpt-4o-mini", "agent": "math_agent"}
+
+    # Verify trajectory-level eval fields
+    traj = data["trajectories"][0]
+    assert traj["name"] == "solver"
+    assert traj["signals"] == {"accuracy": 1.0}
+
+    # Verify step-level eval fields preserved (not remapped to observation/model_response)
+    step = traj["steps"][0]
+    assert step["input"] == "What is 2+2?"
+    assert step["output"] == "The answer is \\boxed{4}"
+    assert step["metadata"] == {"token_count": 42}
+    # These training-only fields should NOT be present
+    assert "observation" not in step or step.get("observation") is None
+    assert "model_response" not in step or step.get("model_response") is None
+
+
+def test_eval_episode_search_indexes_input_output(client, eval_session):
+    """Search should index eval step fields (input/output) not just training fields."""
+    client.post(
+        "/api/episodes",
+        json={
+            "session_id": eval_session["id"],
+            "session_type": "eval",
+            "step": 0,
+            "episode_id": "eval-search-test",
+            "task": {"question": "unique_eval_searchterm"},
+            "is_correct": True,
+            "trajectories": [
+                {
+                    "uid": "t1",
+                    "name": "solver",
+                    "steps": [
+                        {
+                            "input": "eval_specific_input_xyz",
+                            "output": "eval_specific_output_abc",
+                            "done": True,
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    # Should find by input text
+    response = client.get(f"/api/episodes/search?q=eval_specific_input_xyz&session_id={eval_session['id']}")
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results["episodes"]) == 1
+    assert results["episodes"][0]["id"] == "eval-search-test"
+
+    # Should find by output text
+    response = client.get(f"/api/episodes/search?q=eval_specific_output_abc&session_id={eval_session['id']}")
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results["episodes"]) == 1
+
+
+def test_training_episode_still_works_after_schema_change(client, test_session):
+    """Training episodes with AgentStep fields should still work correctly."""
+    episode_data = {
+        "session_id": test_session["id"],
+        "session_type": "training",
+        "step": 1,
+        "episode_id": "training-compat-test",
+        "task": {"question": "Compat test"},
+        "is_correct": True,
+        "trajectories": [
+            {
+                "uid": "t1",
+                "reward": 1.0,
+                "info": {"solver": "cot"},
+                "steps": [
+                    {
+                        "observation": "Compat test question",
+                        "thought": "Let me think...",
+                        "model_response": "Answer is 42",
+                        "action": "submit(42)",
+                        "reward": 1.0,
+                        "done": True,
+                        "mc_return": 0.95,
+                        "advantage": 0.3,
+                    }
+                ],
+            }
+        ],
+    }
+
+    response = client.post("/api/episodes", json=episode_data)
+    assert response.status_code == 200
+
+    data = response.json()
+    step = data["trajectories"][0]["steps"][0]
+    assert step["observation"] == "Compat test question"
+    assert step["model_response"] == "Answer is 42"
+    assert step["mc_return"] == 0.95
+    assert step["advantage"] == 0.3

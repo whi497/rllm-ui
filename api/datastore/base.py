@@ -2,12 +2,18 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
-def extract_searchable_text(episode_data: dict) -> str:
+def extract_searchable_text(episode_data: dict, step_model: type | None = None) -> str:
     """Extract searchable text from episode data.
 
-    Extracts text from task, observations, actions, and model responses
-    to create a searchable string for full-text search indexing.
+    Uses the step model's _searchable_fields to determine which fields to index.
+    Falls back to AgentStep fields if no model is provided.
     """
+    if step_model is None:
+        from models import AgentStep
+        step_model = AgentStep
+
+    searchable_fields = getattr(step_model, "_searchable_fields", ["input", "output", "action"])
+
     parts = []
 
     # Task question/description
@@ -21,14 +27,10 @@ def extract_searchable_text(episode_data: dict) -> str:
     # Trajectory steps
     for traj in episode_data.get("trajectories", []):
         for step in traj.get("steps", []):
-            parts.extend(
-                [
-                    str(step.get("observation", "")),
-                    str(step.get("thought", "")),
-                    str(step.get("action", "")),
-                    str(step.get("model_response", "")),
-                ]
-            )
+            for field in searchable_fields:
+                val = step.get(field, "")
+                if val:
+                    parts.append(str(val))
             # Also extract from chat_completions if present
             for msg in step.get("chat_completions", []) or []:
                 if isinstance(msg, dict):
@@ -122,7 +124,7 @@ class DataStore(ABC):
     # ── Session / project methods ─────────────────────────────────
 
     @abstractmethod
-    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any], owner_id: str | None = None) -> str:
+    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any], owner_id: str | None = None, session_type: str = "training") -> str:
         """Create a new training session."""
         pass
 
@@ -132,7 +134,7 @@ class DataStore(ABC):
         pass
 
     @abstractmethod
-    def append_episode(self, session_id: str, episode_data: dict[str, Any]):
+    def append_episode(self, session_id: str, episode_data: dict[str, Any], search_text: str | None = None):
         """Append an episode to a session."""
         pass
 
@@ -339,6 +341,28 @@ class DataStore(ABC):
     @abstractmethod
     def append_chat_message(self, chat_session_id: str, role: str, content: str) -> dict[str, Any]:
         """Append a message to a chat session. Updates the session's updated_at. Returns the message dict."""
+        pass
+
+    # ── Eval result methods ─────────────────────────────────────────
+
+    @abstractmethod
+    def create_eval_result(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Store an eval result. Returns the created record."""
+        pass
+
+    @abstractmethod
+    def get_eval_results(self, session_id: str | None = None) -> list[dict[str, Any]]:
+        """Get eval results, optionally filtered by session_id."""
+        pass
+
+    @abstractmethod
+    def get_eval_result(self, result_id: str) -> dict[str, Any] | None:
+        """Get a single eval result by ID."""
+        pass
+
+    @abstractmethod
+    def get_eval_results_by_project(self, project_id: str) -> list[dict[str, Any]]:
+        """Get all eval results for sessions in a project (for leaderboard grouping)."""
         pass
 
     def close(self):

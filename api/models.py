@@ -1,7 +1,7 @@
 """Pydantic models for API request/response validation."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
 
@@ -12,6 +12,7 @@ class SessionCreate(BaseModel):
     experiment: str
     config: dict[str, Any] | None = None
     source_metadata: dict[str, Any] | None = None
+    session_type: str = "training"
 
 
 class SessionResponse(BaseModel):
@@ -23,6 +24,7 @@ class SessionResponse(BaseModel):
     source_metadata: dict[str, Any] | None
     color: str | None = None
     status: str = "running"
+    session_type: str = "training"
     created_at: datetime
     completed_at: datetime | None = None
 
@@ -70,31 +72,34 @@ class MetricsResponse(BaseModel):
     created_at: datetime
 
 
-# Episode models
-class TrajectoryStep(BaseModel):
-    observation: Any = None
-    thought: str = ""
+# Episode models — Base (mirrors rllm.types.*)
+class Step(BaseModel):
+    _searchable_fields: ClassVar[list[str]] = ["input", "output", "action"]
+
+    id: str | None = None
+    input: Any = None
+    output: Any = None
     action: Any = None
-    model_response: Any | None = None
-    chat_completions: Any | None = None
-    info: dict[str, Any] | None = None
     reward: float = 0.0
     done: bool = False
-    mc_return: float = 0.0
-    advantage: float | list[float] | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class Trajectory(BaseModel):
     uid: str
-    name: str | None = None
-    task: dict[str, Any] | None = None
+    name: str = "agent"
+    task: Any = None
+    steps: list[Step] = []
     reward: float | None = None
-    info: dict[str, Any] | None = None
-    steps: list[TrajectoryStep] = []
+    input: dict | None = None
+    output: Any = None
+    signals: dict[str, float] = {}
+    metadata: dict[str, Any] | None = None
 
 
-class EpisodeCreate(BaseModel):
+class Episode(BaseModel):
     session_id: str
+    session_type: str = "training"
     step: int
     episode_id: str
     task: dict[str, Any]
@@ -102,6 +107,30 @@ class EpisodeCreate(BaseModel):
     termination_reason: str | None = None
     trajectories: list[Trajectory]
     metrics: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+    artifacts: dict[str, Any] | None = None
+
+
+# Episode models — Agent (extends base, mirrors rllm.agents.agent.*)
+class AgentStep(Step):
+    _searchable_fields: ClassVar[list[str]] = ["observation", "thought", "action", "model_response"]
+
+    observation: Any = None
+    thought: str = ""
+    model_response: Any | None = None
+    chat_completions: Any | None = None
+    info: dict[str, Any] | None = None
+    mc_return: float = 0.0
+    advantage: float | list[float] | None = None
+
+
+class AgentTrajectory(Trajectory):
+    steps: list[AgentStep] = []
+    info: dict[str, Any] | None = None
+
+
+class AgentEpisode(Episode):
+    trajectories: list[AgentTrajectory]
     info: dict[str, Any] | None = None
 
 
@@ -115,6 +144,8 @@ class EpisodeResponse(BaseModel):
     trajectories: list[dict[str, Any]]
     metrics: dict[str, Any] | None = None
     info: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+    artifacts: dict[str, Any] | None = None
     created_at: datetime
     rank: float | None = None  # Relevance score from PostgreSQL full-text search
 
@@ -237,3 +268,30 @@ class AuthConfigResponse(BaseModel):
     auth_required: bool
     deployment_mode: str
     oauth_providers: list[str] = []
+
+
+# Eval models
+class EvalItemCreate(BaseModel):
+    idx: int
+    reward: float
+    is_correct: bool
+    error: str | None = None
+    signals: dict[str, float] = {}
+
+
+class EvalResultCreate(BaseModel):
+    session_id: str
+    dataset_name: str
+    model: str
+    agent: str
+    score: float
+    total: int
+    correct: int
+    errors: int
+    signal_averages: dict[str, float] = {}
+    items: list[EvalItemCreate] = []
+
+
+class EvalResultResponse(EvalResultCreate):
+    id: str
+    created_at: str
