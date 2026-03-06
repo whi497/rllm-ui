@@ -1,7 +1,7 @@
 """Sessions router."""
 
 from auth import CurrentUser
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from models import ProjectRename, ProjectResponse, SessionCreate, SessionFinish, SessionUpdate, SessionResponse
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -15,17 +15,20 @@ def create_session(request: Request, session: SessionCreate, user: CurrentUser):
     session_id = store.create_session(
         project=session.project, experiment=session.experiment,
         config=session.config, source_metadata=session.source_metadata,
-        owner_id=owner_id,
+        owner_id=owner_id, session_type=session.session_type,
     )
     return store.get_session(session_id)
 
 
 @router.get("", response_model=list[SessionResponse])
-def list_sessions(request: Request, user: CurrentUser):
-    """List all sessions."""
+def list_sessions(request: Request, user: CurrentUser, type: str | None = Query(None)):
+    """List all sessions, optionally filtered by session_type."""
     store = request.app.state.store
     owner_id = user["id"] if user else None
-    return store.get_all_sessions(owner_id=owner_id)
+    sessions = store.get_all_sessions(owner_id=owner_id)
+    if type:
+        sessions = [s for s in sessions if s.get("session_type", "training") == type]
+    return sessions
 
 
 @router.get("/projects", response_model=list[ProjectResponse])

@@ -47,11 +47,18 @@ class SQLiteStore(DataStore):
                     source_metadata JSON,
                     color TEXT,
                     status TEXT DEFAULT 'running',
+                    session_type TEXT DEFAULT 'training',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     completed_at TIMESTAMP,
                     last_heartbeat_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Migration: add session_type column to existing sessions tables
+            try:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT 'training'")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
             # Metrics table
             cursor.execute("""
@@ -76,10 +83,24 @@ class SQLiteStore(DataStore):
                     trajectories JSON,
                     metrics JSON,
                     info JSON,
+                    artifacts JSON,
+                    metadata JSON,
                     search_text TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Migration: add artifacts column to existing episodes tables
+            try:
+                cursor.execute("ALTER TABLE episodes ADD COLUMN artifacts JSON")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            # Migration: add metadata column to existing episodes tables
+            try:
+                cursor.execute("ALTER TABLE episodes ADD COLUMN metadata JSON")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
             # Logs table
             cursor.execute("""
@@ -127,6 +148,24 @@ class SQLiteStore(DataStore):
                     chat_session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Eval results table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS eval_results (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+                    dataset_name TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    score REAL NOT NULL,
+                    total INTEGER NOT NULL,
+                    correct INTEGER NOT NULL,
+                    errors INTEGER NOT NULL,
+                    signal_averages JSON,
+                    items JSON,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -246,13 +285,13 @@ class SQLiteStore(DataStore):
 
     # ── Session methods ──────────────────────────────────────────────
 
-    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any], owner_id: str | None = None) -> str:
+    def create_session(self, project: str, experiment: str, config: dict[str, Any], source_metadata: dict[str, Any], owner_id: str | None = None, session_type: str = "training") -> str:
         project_id = self.get_or_create_project(project, owner_id=owner_id)
         session_id = str(uuid.uuid4())
         with self._get_conn() as conn:
             conn.execute(
-                "INSERT INTO sessions (id, project_id, experiment, config, source_metadata) VALUES (?, ?, ?, ?, ?)",
-                (session_id, project_id, experiment, json.dumps(config), json.dumps(source_metadata)),
+                "INSERT INTO sessions (id, project_id, experiment, config, source_metadata, session_type) VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, project_id, experiment, json.dumps(config), json.dumps(source_metadata), session_type),
             )
             conn.commit()
         return session_id
@@ -270,7 +309,7 @@ class SQLiteStore(DataStore):
                 return d
         return None
 
-    def append_episode(self, session_id: str, episode_data: dict[str, Any]):
+    def append_episode(self, session_id: str, episode_data: dict[str, Any], search_text: str | None = None):
         ep_id = episode_data.get("episode_id")
         step = episode_data.get("step")
         task = json.dumps(episode_data.get("task"))
@@ -279,16 +318,19 @@ class SQLiteStore(DataStore):
         trajectories = json.dumps(episode_data.get("trajectories", []))
         metrics = json.dumps(episode_data.get("metrics"))
         info = json.dumps(episode_data.get("info"))
+        artifacts = json.dumps(episode_data.get("artifacts"))
+        metadata = json.dumps(episode_data.get("metadata"))
 
-        search_text = extract_searchable_text(episode_data)
+        if search_text is None:
+            search_text = extract_searchable_text(episode_data)
 
         with self._get_conn() as conn:
             conn.execute(
                 """
-                INSERT INTO episodes (id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, search_text)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO episodes (id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, artifacts, metadata, search_text)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (ep_id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, search_text),
+                (ep_id, session_id, step, task, is_correct, termination_reason, trajectories, metrics, info, artifacts, metadata, search_text),
             )
             conn.commit()
 
@@ -391,45 +433,39 @@ class SQLiteStore(DataStore):
                 results.append(d)
             return results
 
+    def _parse_episode_row(self, d: dict[str, Any]) -> dict[str, Any]:
+        """Parse JSON columns from an episode row."""
+        if d.get("trajectories") and isinstance(d["trajectories"], str):
+            d["trajectories"] = json.loads(d["trajectories"])
+        else:
+            d.setdefault("trajectories", [])
+        if d.get("metrics") and isinstance(d["metrics"], str):
+            d["metrics"] = json.loads(d["metrics"])
+        else:
+            d.setdefault("metrics", {})
+        if d.get("info") and isinstance(d["info"], str):
+            d["info"] = json.loads(d["info"])
+        if d.get("artifacts") and isinstance(d["artifacts"], str):
+            d["artifacts"] = json.loads(d["artifacts"])
+        if d.get("metadata") and isinstance(d["metadata"], str):
+            d["metadata"] = json.loads(d["metadata"])
+        if d["task"]:
+            d["task"] = json.loads(d["task"])
+        return d
+
     def get_episodes(self, session_id: str) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             rows = conn.execute("SELECT * FROM episodes WHERE session_id = ? ORDER BY step", (session_id,)).fetchall()
             results = []
             for row in rows:
-                d = dict(row)
-                if d.get("trajectories") and isinstance(d["trajectories"], str):
-                    d["trajectories"] = json.loads(d["trajectories"])
-                else:
-                    d.setdefault("trajectories", [])
-                if d.get("metrics") and isinstance(d["metrics"], str):
-                    d["metrics"] = json.loads(d["metrics"])
-                else:
-                    d.setdefault("metrics", {})
-                if d.get("info") and isinstance(d["info"], str):
-                    d["info"] = json.loads(d["info"])
-                if d["task"]:
-                    d["task"] = json.loads(d["task"])
-                results.append(d)
+                results.append(self._parse_episode_row(dict(row)))
             return results
 
     def get_episode(self, episode_id: str) -> dict[str, Any] | None:
         with self._get_conn() as conn:
             row = conn.execute("SELECT * FROM episodes WHERE id = ?", (episode_id,)).fetchone()
             if row:
-                d = dict(row)
-                if d.get("trajectories") and isinstance(d["trajectories"], str):
-                    d["trajectories"] = json.loads(d["trajectories"])
-                else:
-                    d.setdefault("trajectories", [])
-                if d.get("metrics") and isinstance(d["metrics"], str):
-                    d["metrics"] = json.loads(d["metrics"])
-                else:
-                    d.setdefault("metrics", {})
-                if d.get("info") and isinstance(d["info"], str):
-                    d["info"] = json.loads(d["info"])
-                if d["task"]:
-                    d["task"] = json.loads(d["task"])
-                return d
+                return self._parse_episode_row(dict(row))
         return None
 
     def search_episodes(self, query: str, session_id: str | None = None, step: int | None = None) -> dict[str, Any]:
@@ -450,20 +486,7 @@ class SQLiteStore(DataStore):
             rows = conn.execute(sql, params).fetchall()
             results = []
             for row in rows:
-                d = dict(row)
-                if d.get("trajectories") and isinstance(d["trajectories"], str):
-                    d["trajectories"] = json.loads(d["trajectories"])
-                else:
-                    d.setdefault("trajectories", [])
-                if d.get("metrics") and isinstance(d["metrics"], str):
-                    d["metrics"] = json.loads(d["metrics"])
-                else:
-                    d.setdefault("metrics", {})
-                if d.get("info") and isinstance(d["info"], str):
-                    d["info"] = json.loads(d["info"])
-                if d["task"]:
-                    d["task"] = json.loads(d["task"])
-                results.append(d)
+                results.append(self._parse_episode_row(dict(row)))
 
             matched_terms = query.lower().split()
 
@@ -629,7 +652,7 @@ class SQLiteStore(DataStore):
                 project_rows = conn.execute("SELECT * FROM projects ORDER BY created_at").fetchall()
             # Get all sessions with project info
             session_rows = conn.execute(
-                "SELECT s.id, s.project_id, s.experiment, s.status, s.created_at, s.completed_at FROM sessions s ORDER BY s.created_at DESC"
+                "SELECT s.id, s.project_id, s.experiment, s.status, s.created_at, s.completed_at FROM sessions s WHERE s.session_type != 'eval' ORDER BY s.created_at DESC"
             ).fetchall()
 
             # Group sessions by project_id
@@ -740,3 +763,71 @@ class SQLiteStore(DataStore):
             msg_id = cursor.lastrowid
             row = conn.execute("SELECT * FROM chat_messages WHERE id = ?", (msg_id,)).fetchone()
             return dict(row)
+
+    # ── Eval result methods ──────────────────────────────────────
+
+    def create_eval_result(self, data: dict[str, Any]) -> dict[str, Any]:
+        result_id = str(uuid.uuid4())
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO eval_results (id, session_id, dataset_name, model, agent, score, total, correct, errors, signal_averages, items)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (result_id, data["session_id"], data["dataset_name"], data["model"], data["agent"],
+                 data["score"], data["total"], data["correct"], data["errors"],
+                 json.dumps(data.get("signal_averages", {})), json.dumps(data.get("items", []))),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM eval_results WHERE id = ?", (result_id,)).fetchone()
+            d = dict(row)
+            if d.get("signal_averages") and isinstance(d["signal_averages"], str):
+                d["signal_averages"] = json.loads(d["signal_averages"])
+            if d.get("items") and isinstance(d["items"], str):
+                d["items"] = json.loads(d["items"])
+            return d
+
+    def get_eval_results(self, session_id: str | None = None) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            if session_id:
+                rows = conn.execute("SELECT * FROM eval_results WHERE session_id = ? ORDER BY created_at DESC", (session_id,)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM eval_results ORDER BY created_at DESC").fetchall()
+            results = []
+            for row in rows:
+                d = dict(row)
+                if d.get("signal_averages") and isinstance(d["signal_averages"], str):
+                    d["signal_averages"] = json.loads(d["signal_averages"])
+                if d.get("items") and isinstance(d["items"], str):
+                    d["items"] = json.loads(d["items"])
+                results.append(d)
+            return results
+
+    def get_eval_result(self, result_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM eval_results WHERE id = ?", (result_id,)).fetchone()
+            if row:
+                d = dict(row)
+                if d.get("signal_averages") and isinstance(d["signal_averages"], str):
+                    d["signal_averages"] = json.loads(d["signal_averages"])
+                if d.get("items") and isinstance(d["items"], str):
+                    d["items"] = json.loads(d["items"])
+                return d
+        return None
+
+    def get_eval_results_by_project(self, project_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT er.* FROM eval_results er
+                JOIN sessions s ON er.session_id = s.id
+                WHERE s.project_id = ?
+                ORDER BY er.created_at DESC""",
+                (project_id,),
+            ).fetchall()
+            results = []
+            for row in rows:
+                d = dict(row)
+                if d.get("signal_averages") and isinstance(d["signal_averages"], str):
+                    d["signal_averages"] = json.loads(d["signal_averages"])
+                if d.get("items") and isinstance(d["items"], str):
+                    d["items"] = json.loads(d["items"])
+                results.append(d)
+            return results

@@ -37,4 +37,10 @@ export {
   ArrowUpRight as NorthEastIcon,
   // Expand/maximize icon for chart detail view
   Maximize2 as MaximizeIcon,
+  // Eval icons
+  ClipboardCheck as ClipboardCheckIcon,
+  LayoutList as LayoutListIcon,
+  Table as TableIcon,
+  Filter as FilterIcon,
+  Trophy as TrophyIcon,
 } from "lucide-react";

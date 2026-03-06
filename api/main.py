@@ -15,7 +15,7 @@ load_dotenv()
 from datastore.factory import get_datastore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import agent, auth, episodes, health, logs, metrics, oauth, sessions, settings, sse, trajectory_groups
+from routers import agent, auth, episodes, eval_results, health, logs, metrics, oauth, sessions, settings, sse, trajectory_groups
 
 logger = logging.getLogger(__name__)
 
@@ -118,3 +118,4 @@ app.include_router(agent.router)
 app.include_router(settings.router)
 app.include_router(logs.router)
 app.include_router(trajectory_groups.router)
+app.include_router(eval_results.router)
