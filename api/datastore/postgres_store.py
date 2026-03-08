@@ -63,7 +63,7 @@ class PostgresStore(DataStore):
                         api_key TEXT UNIQUE,
                         oauth_provider TEXT,
                         oauth_provider_id TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(oauth_provider, oauth_provider_id)
                     )
                 """)
@@ -101,7 +101,7 @@ class PostgresStore(DataStore):
                         id TEXT PRIMARY KEY,
                         name TEXT NOT NULL,
                         owner_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
 
@@ -148,9 +148,9 @@ class PostgresStore(DataStore):
                         color TEXT,
                         status TEXT DEFAULT 'running',
                         session_type TEXT DEFAULT 'training',
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        completed_at TIMESTAMP,
-                        last_heartbeat_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                        completed_at TIMESTAMPTZ,
+                        last_heartbeat_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
 
@@ -185,7 +185,7 @@ class PostgresStore(DataStore):
                         session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
                         step INTEGER,
                         data JSONB,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
 
@@ -202,7 +202,7 @@ class PostgresStore(DataStore):
                         metrics JSONB,
                         info JSONB,
                         search_text TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
 
@@ -227,7 +227,7 @@ class PostgresStore(DataStore):
                         timestamp TEXT NOT NULL,
                         stream TEXT NOT NULL DEFAULT 'stdout',
                         message TEXT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
                 cursor.execute("""
@@ -246,7 +246,7 @@ class PostgresStore(DataStore):
                         num_trajectories INTEGER,
                         avg_reward REAL,
                         metadata JSONB,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
 
@@ -266,8 +266,8 @@ class PostgresStore(DataStore):
                         id TEXT PRIMARY KEY,
                         session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
                         title TEXT NOT NULL DEFAULT 'New chat',
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
 
@@ -278,7 +278,7 @@ class PostgresStore(DataStore):
                         chat_session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
                         role TEXT NOT NULL,
                         content TEXT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
                 cursor.execute("""
@@ -300,7 +300,7 @@ class PostgresStore(DataStore):
                         errors INTEGER NOT NULL,
                         signal_averages JSONB,
                         items JSONB,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
                 cursor.execute("""
@@ -1061,8 +1061,8 @@ class PostgresStore(DataStore):
                 )
                 row = cursor.fetchone()
                 cursor.execute(
-                    "UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = %s",
-                    (chat_session_id,),
+                    "UPDATE chat_sessions SET updated_at = %s WHERE id = %s",
+                    (datetime.now(UTC).isoformat(), chat_session_id),
                 )
                 conn.commit()
                 return dict(row)

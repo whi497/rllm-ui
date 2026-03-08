@@ -2,10 +2,23 @@ import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .base import DataStore, extract_searchable_text
+
+
+def _convert_timestamp(val: bytes) -> datetime:
+    """Parse TIMESTAMP column values from SQLite and attach UTC tzinfo."""
+    text = val.decode("utf-8")
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+sqlite3.register_converter("TIMESTAMP", _convert_timestamp)
 
 
 class SQLiteStore(DataStore):
@@ -14,7 +27,7 @@ class SQLiteStore(DataStore):
 
     @contextmanager
     def _get_conn(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         try:
@@ -756,8 +769,8 @@ class SQLiteStore(DataStore):
                 (chat_session_id, role, content),
             )
             conn.execute(
-                "UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (chat_session_id,),
+                "UPDATE chat_sessions SET updated_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), chat_session_id),
             )
             conn.commit()
             msg_id = cursor.lastrowid
