@@ -178,6 +178,30 @@ class PostgresStore(DataStore):
                     END $$;
                 """)
 
+                # Migration: upgrade TIMESTAMP → TIMESTAMPTZ on existing tables
+                for tbl, col in [
+                    ("users", "created_at"),
+                    ("projects", "created_at"),
+                    ("sessions", "created_at"),
+                    ("sessions", "completed_at"),
+                    ("sessions", "last_heartbeat_at"),
+                    ("metrics", "created_at"),
+                    ("episodes", "created_at"),
+                    ("logs", "created_at"),
+                    ("trajectory_groups", "created_at"),
+                    ("chat_sessions", "created_at"),
+                    ("chat_sessions", "updated_at"),
+                    ("chat_messages", "created_at"),
+                    ("eval_results", "created_at"),
+                ]:
+                    cursor.execute(f"""
+                        DO $$ BEGIN
+                            ALTER TABLE {tbl} ALTER COLUMN {col} TYPE TIMESTAMPTZ;
+                        EXCEPTION WHEN undefined_table THEN NULL;
+                        WHEN undefined_column THEN NULL;
+                        END $$;
+                    """)
+
                 # Metrics table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS metrics (
