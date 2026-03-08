@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import type { Metric } from "../hooks/useSSE";
 import { RewardChart, getAvailableMetrics } from "./RewardChart";
-import { BarChartIcon, SearchIcon, MaximizeIcon } from "./icons";
+import { BarChartIcon, SearchIcon, MaximizeIcon, PushPinIcon } from "./icons";
 import { EmptyState, ThreeDotMenu, CollapsibleSection } from "./ui";
 import { MetricDetailModal } from "./MetricDetailModal";
 
@@ -16,6 +16,7 @@ interface MetricsDashboardProps {
   onExpandedGroupsChange: React.Dispatch<React.SetStateAction<Set<string>>>;
   hasAutoExpanded: boolean;
   onHasAutoExpandedChange: (v: boolean) => void;
+  pinnedStorageKey: string;
 }
 
 /** Groups metric keys by first `/` segment, with priority ordering. */
@@ -122,8 +123,10 @@ const MetricGroup: React.FC<{
   onToggle: () => void;
   onStepClick: (step: number, metricKey: string) => void;
   onExpand: (metricKey: string) => void;
+  isPinned: boolean;
+  onTogglePin: (prefix: string) => void;
   color?: string;
-}> = ({ prefix, metricKeys, totalCount, metrics, searchQuery, isExpanded, onToggle, onStepClick, onExpand, color }) => {
+}> = ({ prefix, metricKeys, totalCount, metrics, searchQuery, isExpanded, onToggle, onStepClick, onExpand, isPinned, onTogglePin, color }) => {
   const isFiltering = searchQuery.trim().length > 0;
   return (
     <CollapsibleSection
@@ -135,11 +138,22 @@ const MetricGroup: React.FC<{
         </h3>
       }
       rightLabel={
-        isFiltering ? (
-          <><span className="text-accent-600 font-medium">{metricKeys.length}</span> / {totalCount}</>
-        ) : (
-          <>{metricKeys.length} metric{metricKeys.length !== 1 ? "s" : ""}</>
-        )
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">
+            {isFiltering ? (
+              <><span className="text-accent-600 font-medium">{metricKeys.length}</span> / {totalCount}</>
+            ) : (
+              <>{metricKeys.length} metric{metricKeys.length !== 1 ? "s" : ""}</>
+            )}
+          </span>
+          <button
+            onClick={(e) => { e.stopPropagation(); onTogglePin(prefix); }}
+            className={`p-0.5 transition-colors ${isPinned ? 'text-accent-500 hover:text-accent-700' : 'text-gray-300 hover:text-gray-500'}`}
+            title={isPinned ? "Unpin section" : "Pin to top"}
+          >
+            <PushPinIcon size={14} fill={isPinned ? "currentColor" : "none"} />
+          </button>
+        </div>
       }
       contentClassName="px-4 pb-4 grid grid-cols-3 gap-3"
     >
@@ -167,9 +181,32 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   onExpandedGroupsChange: setExpandedGroups,
   hasAutoExpanded,
   onHasAutoExpandedChange: setHasAutoExpanded,
+  pinnedStorageKey,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [detailMetric, setDetailMetric] = useState<string | null>(null);
+  const [pinnedSections, setPinnedSections] = useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(pinnedStorageKey);
+        return stored ? new Set(JSON.parse(stored)) : new Set();
+      } catch { return new Set(); }
+    }
+    return new Set();
+  });
+
+  const toggleSectionPin = useCallback((prefix: string) => {
+    setPinnedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(prefix)) {
+        next.delete(prefix);
+      } else {
+        next.add(prefix);
+      }
+      localStorage.setItem(pinnedStorageKey, JSON.stringify([...next]));
+      return next;
+    });
+  }, [pinnedStorageKey]);
 
   const availableMetrics = useMemo(() => getAvailableMetrics(metrics), [metrics]);
   const grouped = useMemo(() => groupMetricsByPrefix(availableMetrics), [availableMetrics]);
@@ -295,21 +332,32 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
             className="h-32"
           />
         ) : (
-          filteredGroupKeys.map((prefix) => (
-            <MetricGroup
-              key={prefix}
-              prefix={prefix}
-              metricKeys={filteredGrouped.get(prefix)!}
-              totalCount={grouped.get(prefix)?.length ?? 0}
-              metrics={metrics}
-              searchQuery={searchQuery}
-              isExpanded={expandedGroups.has(prefix)}
-              onToggle={() => toggleGroup(prefix)}
-              onStepClick={onChartClick}
-              onExpand={setDetailMetric}
-              color={color}
-            />
-          ))
+          <>
+            {/* Pinned sections first, then unpinned */}
+            {[...filteredGroupKeys].sort((a, b) => {
+              const aPinned = pinnedSections.has(a);
+              const bPinned = pinnedSections.has(b);
+              if (aPinned && !bPinned) return -1;
+              if (!aPinned && bPinned) return 1;
+              return 0;
+            }).map((prefix) => (
+              <MetricGroup
+                key={prefix}
+                prefix={prefix}
+                metricKeys={filteredGrouped.get(prefix)!}
+                totalCount={grouped.get(prefix)?.length ?? 0}
+                metrics={metrics}
+                searchQuery={searchQuery}
+                isExpanded={expandedGroups.has(prefix)}
+                onToggle={() => toggleGroup(prefix)}
+                onStepClick={onChartClick}
+                onExpand={setDetailMetric}
+                isPinned={pinnedSections.has(prefix)}
+                onTogglePin={toggleSectionPin}
+                color={color}
+              />
+            ))}
+          </>
         )}
       </div>
     </div>

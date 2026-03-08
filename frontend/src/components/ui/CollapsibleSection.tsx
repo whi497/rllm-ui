@@ -25,9 +25,12 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   disabled = false,
 }) => (
   <div className={className}>
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onToggle}
-      className={`w-full px-4 py-2.5 bg-layer-1 flex items-center justify-between hover:bg-layer-2 transition-colors text-left ${disabled ? "cursor-default" : ""}`}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
+      className={`w-full px-4 py-2.5 bg-layer-1 flex items-center justify-between hover:bg-layer-2 transition-colors text-left ${disabled ? "cursor-default" : "cursor-pointer"}`}
     >
       <div className="flex items-center gap-2">
         {isExpanded ? (
@@ -38,7 +41,7 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
         {title}
       </div>
       {rightLabel && <span className="text-xs text-gray-400">{rightLabel}</span>}
-    </button>
+    </div>
     {isExpanded && (
       <div className={contentClassName}>{children}</div>
     )}
