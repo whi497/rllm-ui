@@ -116,9 +116,17 @@ export const TrainingRunDetail: React.FC = () => {
   const [episodeViewMode, setEpisodeViewMode] = useState<"episodes" | "groups">("episodes");
   const [metaSearchQuery, setMetaSearchQuery] = useState("");
 
-  // Chart expanded groups (lifted from MetricsDashboard to persist across tab switches)
-  const [chartExpandedGroups, setChartExpandedGroups] = useState<Set<string>>(new Set());
-  const [chartHasAutoExpanded, setChartHasAutoExpanded] = useState(false);
+  // Chart expanded groups — persisted to localStorage per session
+  const expandedStorageKey = `expandedSections:run:${sessionId}`;
+  const [chartExpandedGroups, setChartExpandedGroups] = useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(expandedStorageKey);
+        return stored ? new Set(JSON.parse(stored)) : new Set();
+      } catch { return new Set(); }
+    }
+    return new Set();
+  });
 
   // Code tab expanded sections (lifted from WorkflowDiagram to persist across tab switches)
   const [codeExpandedSections, setCodeExpandedSections] = useState<Set<string>>(new Set());
@@ -488,8 +496,7 @@ export const TrainingRunDetail: React.FC = () => {
             color={experimentColor}
             expandedGroups={chartExpandedGroups}
             onExpandedGroupsChange={setChartExpandedGroups}
-            hasAutoExpanded={chartHasAutoExpanded}
-            onHasAutoExpandedChange={setChartHasAutoExpanded}
+            expandedStorageKey={expandedStorageKey}
             pinnedStorageKey={`pinnedSections:run:${sessionId}`}
           />
         ) : activeTab === "training" ? (

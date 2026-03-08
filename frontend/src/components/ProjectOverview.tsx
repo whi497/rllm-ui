@@ -71,8 +71,16 @@ export const ProjectOverview: React.FC = () => {
     Map<string, SessionMetrics>
   >(new Map());
   const [loading, setLoading] = useState(true);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
+  const expandedStorageKey = `expandedSections:project:${projectId}`;
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(expandedStorageKey);
+        return stored ? new Set(JSON.parse(stored)) : new Set();
+      } catch { return new Set(); }
+    }
+    return new Set();
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [detailMetric, setDetailMetric] = useState<string | null>(null);
   const pinnedStorageKey = `pinnedSections:project:${projectId}`;
@@ -212,14 +220,6 @@ export const ProjectOverview: React.FC = () => {
     [filteredGrouped]
   );
 
-  // Auto-expand first group
-  useEffect(() => {
-    if (groupKeys.length > 0 && !hasAutoExpanded) {
-      setExpandedGroups(new Set([groupKeys[0]]));
-      setHasAutoExpanded(true);
-    }
-  }, [groupKeys, hasAutoExpanded]);
-
   // Auto-expand all when searching
   useEffect(() => {
     if (searchQuery.trim()) {
@@ -227,17 +227,29 @@ export const ProjectOverview: React.FC = () => {
     }
   }, [searchQuery, filteredGroupKeys]);
 
+  const persistExpanded = useCallback((groups: Set<string>) => {
+    localStorage.setItem(expandedStorageKey, JSON.stringify([...groups]));
+  }, [expandedStorageKey]);
+
   const toggleGroup = (prefix: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(prefix)) next.delete(prefix);
       else next.add(prefix);
+      persistExpanded(next);
       return next;
     });
   };
 
-  const expandAll = () => setExpandedGroups(new Set(filteredGroupKeys));
-  const collapseAll = () => setExpandedGroups(new Set());
+  const expandAll = () => {
+    const next = new Set(filteredGroupKeys);
+    setExpandedGroups(next);
+    persistExpanded(next);
+  };
+  const collapseAll = () => {
+    setExpandedGroups(new Set());
+    persistExpanded(new Set());
+  };
 
   // Visible sessions for the charts — resolve color from shared overrides first
   const visibleSessions = useMemo(() => {

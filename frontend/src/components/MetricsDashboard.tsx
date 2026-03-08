@@ -14,8 +14,7 @@ interface MetricsDashboardProps {
   color?: string;
   expandedGroups: Set<string>;
   onExpandedGroupsChange: React.Dispatch<React.SetStateAction<Set<string>>>;
-  hasAutoExpanded: boolean;
-  onHasAutoExpandedChange: (v: boolean) => void;
+  expandedStorageKey: string;
   pinnedStorageKey: string;
 }
 
@@ -179,8 +178,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   color,
   expandedGroups,
   onExpandedGroupsChange: setExpandedGroups,
-  hasAutoExpanded,
-  onHasAutoExpandedChange: setHasAutoExpanded,
+  expandedStorageKey,
   pinnedStorageKey,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
@@ -211,15 +209,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   const availableMetrics = useMemo(() => getAvailableMetrics(metrics), [metrics]);
   const grouped = useMemo(() => groupMetricsByPrefix(availableMetrics), [availableMetrics]);
 
-  // Auto-expand first group when metrics first arrive
   const groupKeys = useMemo(() => Array.from(grouped.keys()), [grouped]);
-
-  React.useEffect(() => {
-    if (groupKeys.length > 0 && !hasAutoExpanded) {
-      setExpandedGroups(new Set([groupKeys[0]]));
-      setHasAutoExpanded(true);
-    }
-  }, [groupKeys, hasAutoExpanded]);
 
   // Filter groups based on search query
   const filteredGrouped = useMemo(() => {
@@ -244,6 +234,10 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
     }
   }, [searchQuery, filteredGroupKeys]);
 
+  const persistExpanded = useCallback((groups: Set<string>) => {
+    localStorage.setItem(expandedStorageKey, JSON.stringify([...groups]));
+  }, [expandedStorageKey]);
+
   const toggleGroup = (prefix: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -252,12 +246,20 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       } else {
         next.add(prefix);
       }
+      persistExpanded(next);
       return next;
     });
   };
 
-  const expandAll = () => setExpandedGroups(new Set(filteredGroupKeys));
-  const collapseAll = () => setExpandedGroups(new Set());
+  const expandAll = () => {
+    const next = new Set(filteredGroupKeys);
+    setExpandedGroups(next);
+    persistExpanded(next);
+  };
+  const collapseAll = () => {
+    setExpandedGroups(new Set());
+    persistExpanded(new Set());
+  };
 
   if (availableMetrics.length === 0) {
     return (
