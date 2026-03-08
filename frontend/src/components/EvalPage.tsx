@@ -267,7 +267,7 @@ export const EvalPage: React.FC = () => {
             <EmptyState
               icon={<ClipboardCheckIcon size={32} className="text-gray-400" />}
               title="No evaluation runs yet"
-              description="Run an eval with --ui-url to see results here."
+              description="Run rllm eval with --ui to see results here."
               iconSize="lg"
             />
           </div>
