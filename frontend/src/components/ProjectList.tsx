@@ -202,7 +202,7 @@ export const ProjectList: React.FC = () => {
       <div className="w-full">
         {/* Header */}
         <div className="mb-4">
-          <h1 className="text-lg font-semibold text-black mb-2">Projects</h1>
+          <h1 className="text-lg font-semibold text-black mb-2">Training Projects</h1>
         </div>
 
         {/* Search */}

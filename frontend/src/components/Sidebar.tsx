@@ -210,10 +210,10 @@ export const Sidebar: React.FC = () => {
                   : "text-gray-600 hover:bg-layer-1 hover:text-gray-900"
               }
             `}
-            title={isCollapsed ? "Projects" : undefined}
+            title={isCollapsed ? "Training" : undefined}
           >
             <FolderOpenIcon size={18} className="flex-shrink-0" />
-            {!isCollapsed && <span>Projects</span>}
+            {!isCollapsed && <span>Training</span>}
           </Link>
           <Link
             href="/evaluation"

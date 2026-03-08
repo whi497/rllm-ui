@@ -26,18 +26,29 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const [showColors, setShowColors] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
+  const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; right: number }>({ top: 0, right: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Position the dropdown when opening
+  // Position the dropdown when opening, flip above if near bottom of viewport
   useEffect(() => {
     if (open && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
-      setMenuPos({
-        top: rect.bottom + 4,
-        right: window.innerWidth - rect.right,
-      });
+      const menuHeight = 180; // approximate max menu height
+      const spaceBelow = window.innerHeight - rect.bottom;
+
+      if (spaceBelow < menuHeight) {
+        // Flip above the button
+        setMenuPos({
+          bottom: window.innerHeight - rect.top + 4,
+          right: window.innerWidth - rect.right,
+        });
+      } else {
+        setMenuPos({
+          top: rect.bottom + 4,
+          right: window.innerWidth - rect.right,
+        });
+      }
     }
     if (!open) setShowColors(false);
   }, [open]);
@@ -77,7 +88,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
         <div
           ref={dropdownRef}
           className="fixed bg-white border border-gray-200 rounded-lg shadow-lg z-[9999] py-1 w-36 overflow-visible"
-          style={{ top: menuPos.top, right: menuPos.right }}
+          style={{ top: menuPos.top, bottom: menuPos.bottom, right: menuPos.right }}
         >
           {onPin && (
             <button
