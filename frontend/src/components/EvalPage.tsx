@@ -190,7 +190,7 @@ export const EvalPage: React.FC = () => {
 
   const SortHeader: React.FC<{ field: SortField; children: React.ReactNode; className?: string }> = ({ field, children, className = "" }) => (
     <th
-      className={`px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700 ${className}`}
+      className={`px-3 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer select-none hover:text-gray-700 ${className}`}
       onClick={() => toggleSort(field)}
     >
       <span className="inline-flex items-center gap-1">
@@ -282,7 +282,7 @@ export const EvalPage: React.FC = () => {
                   <SortHeader field="model">Model</SortHeader>
                   <SortHeader field="agent">Agent</SortHeader>
                   <SortHeader field="score">Score</SortHeader>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Correct/Total</th>
+                  <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Correct/Total</th>
                   <SortHeader field="errors">Errors</SortHeader>
                   <SortHeader field="status">Status</SortHeader>
                   <SortHeader field="date">Date</SortHeader>

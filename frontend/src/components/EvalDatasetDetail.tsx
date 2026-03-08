@@ -198,17 +198,17 @@ export const EvalDatasetDetail: React.FC = () => {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Experiment</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Model</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agent</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Correct/Total</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Errors</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Experiment</th>
+                <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Model</th>
+                <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Agent</th>
+                <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Score</th>
+                <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Correct/Total</th>
+                <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Errors</th>
                 {signalNames.map((name) => (
-                  <th key={name} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{name}</th>
+                  <th key={name} className="px-3 py-3 text-left text-sm font-medium text-gray-500">{name}</th>
                 ))}
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Status</th>
+                <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Date</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
