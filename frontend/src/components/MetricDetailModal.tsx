@@ -1,40 +1,44 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Modal } from "./ui";
 import { RewardChart } from "./RewardChart";
 import { CloseIcon } from "./icons";
 import type { Metric } from "../hooks/useSSE";
 
-interface MetricDetailModalProps {
+interface ChartDetailModalProps {
   open: boolean;
   onClose: () => void;
-  metrics: Metric[];
   metricKey: string;
-  color?: string;
+  /** Sorted array of step numbers for brush mapping. */
+  steps: number[];
+  /** Render the chart content. Receives the current x-domain range and brush change handler. */
+  renderChart: (
+    xDomainMin?: number,
+    xDomainMax?: number,
+    onBrushChange?: (startIndex: number, endIndex: number) => void,
+  ) => React.ReactNode;
 }
 
-export const MetricDetailModal: React.FC<MetricDetailModalProps> = ({
+/**
+ * Reusable expanded chart modal with step range controls.
+ * Works for both single-series and multi-series charts.
+ */
+export const ChartDetailModal: React.FC<ChartDetailModalProps> = ({
   open,
   onClose,
-  metrics,
   metricKey,
-  color,
+  steps,
+  renderChart,
 }) => {
   const [xMin, setXMin] = useState("");
   const [xMax, setXMax] = useState("");
 
-  // Compute step range from data for brush sync
   const stepRange = useMemo(() => {
-    const steps = metrics
-      .filter((m) => m.data[metricKey] !== undefined)
-      .map((m) => m.step)
-      .sort((a, b) => a - b);
     if (steps.length === 0) return { min: 0, max: 0 };
     return { min: steps[0], max: steps[steps.length - 1] };
-  }, [metrics, metricKey]);
+  }, [steps]);
 
-  // Initialize inputs with actual step range when modal opens or metric changes
   useEffect(() => {
     if (open) {
       setXMin(String(stepRange.min));
@@ -45,43 +49,30 @@ export const MetricDetailModal: React.FC<MetricDetailModalProps> = ({
   const xDomainMin = xMin !== "" ? parseFloat(xMin) : undefined;
   const xDomainMax = xMax !== "" ? parseFloat(xMax) : undefined;
 
-  // Build sorted chart data for brush index mapping
-  const chartDataSteps = useMemo(() => {
-    const stepSet = new Map<number, number>();
-    metrics.forEach((m) => {
-      if (m.data[metricKey] !== undefined) {
-        stepSet.set(m.step, m.data[metricKey]);
-      }
-    });
-    return Array.from(stepSet.keys()).sort((a, b) => a - b);
-  }, [metrics, metricKey]);
-
-  const handleBrushChange = (startIndex: number, endIndex: number) => {
-    if (chartDataSteps.length === 0) return;
-    const startStep = chartDataSteps[startIndex];
-    const endStep = chartDataSteps[endIndex];
-    if (startStep !== undefined) setXMin(String(startStep));
-    if (endStep !== undefined) setXMax(String(endStep));
-  };
-
   const handleReset = () => {
     setXMin(String(stepRange.min));
     setXMax(String(stepRange.max));
   };
 
+  const handleBrushChange = useCallback((startIndex: number, endIndex: number) => {
+    if (steps.length > 0) {
+      const minStep = steps[Math.min(startIndex, steps.length - 1)];
+      const maxStep = steps[Math.min(endIndex, steps.length - 1)];
+      setXMin(String(minStep));
+      setXMax(String(maxStep));
+    }
+  }, [steps]);
+
   const hasCustomRange =
     (xMin !== "" && parseFloat(xMin) !== stepRange.min) ||
     (xMax !== "" && parseFloat(xMax) !== stepRange.max);
-
-  // Display name: strip prefix (e.g. "reward/mean" -> "mean", "loss/total" -> "total")
-  const displayName = metricKey;
 
   return (
     <Modal open={open} onClose={onClose} maxWidth="max-w-4xl">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-gray-800 font-mono truncate">
-          {displayName}
+          {metricKey}
         </h3>
         <button
           onClick={onClose}
@@ -93,17 +84,7 @@ export const MetricDetailModal: React.FC<MetricDetailModalProps> = ({
 
       {/* Chart */}
       <div className="h-96">
-        <RewardChart
-          metrics={metrics}
-          selectedMetric={metricKey}
-          selectedStep={null}
-          onStepClick={() => {}}
-          color={color}
-          xDomainMin={xDomainMin}
-          xDomainMax={xDomainMax}
-          showBrush
-          onBrushChange={handleBrushChange}
-        />
+        {renderChart(xDomainMin, xDomainMax, handleBrushChange)}
       </div>
 
       {/* Controls */}
@@ -147,5 +128,53 @@ export const MetricDetailModal: React.FC<MetricDetailModalProps> = ({
         )}
       </div>
     </Modal>
+  );
+};
+
+/* ─── Single-series convenience wrapper (used by MetricsDashboard) ── */
+
+interface MetricDetailModalProps {
+  open: boolean;
+  onClose: () => void;
+  metrics: Metric[];
+  metricKey: string;
+  color?: string;
+}
+
+export const MetricDetailModal: React.FC<MetricDetailModalProps> = ({
+  open,
+  onClose,
+  metrics,
+  metricKey,
+  color,
+}) => {
+  const steps = useMemo(() => {
+    const stepSet = new Set<number>();
+    metrics.forEach((m) => {
+      if (m.data[metricKey] !== undefined) stepSet.add(m.step);
+    });
+    return Array.from(stepSet).sort((a, b) => a - b);
+  }, [metrics, metricKey]);
+
+  return (
+    <ChartDetailModal
+      open={open}
+      onClose={onClose}
+      metricKey={metricKey}
+      steps={steps}
+      renderChart={(xDomainMin, xDomainMax, onBrushChange) => (
+        <RewardChart
+          metrics={metrics}
+          selectedMetric={metricKey}
+          selectedStep={null}
+          onStepClick={() => {}}
+          color={color}
+          xDomainMin={xDomainMin}
+          xDomainMax={xDomainMax}
+          showBrush
+          onBrushChange={onBrushChange}
+        />
+      )}
+    />
   );
 };

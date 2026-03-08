@@ -10,14 +10,17 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Brush,
 } from "recharts";
-import { BarChartIcon, SearchIcon } from "./icons";
+import { BarChartIcon, SearchIcon, PushPinIcon, MaximizeIcon } from "./icons";
 import { Spinner, EmptyState, ThreeDotMenu, CollapsibleSection } from "./ui";
+import { ChartDetailModal } from "./MetricDetailModal";
 import { getExperimentColor } from "../utils/experimentColors";
 import { useExperimentVisibility } from "../contexts/ExperimentVisibilityContext";
 import type { Metric } from "../hooks/useSSE";
 import { API_BASE_URL, apiFetch } from "../config/api";
 import { usePolling } from "../hooks/usePolling";
+
 
 interface Session {
   id: string;
@@ -71,6 +74,30 @@ export const ProjectOverview: React.FC = () => {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [detailMetric, setDetailMetric] = useState<string | null>(null);
+  const pinnedStorageKey = `pinnedSections:project:${projectId}`;
+  const [pinnedSections, setPinnedSections] = useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(pinnedStorageKey);
+        return stored ? new Set(JSON.parse(stored)) : new Set();
+      } catch { return new Set(); }
+    }
+    return new Set();
+  });
+
+  const toggleSectionPin = useCallback((prefix: string) => {
+    setPinnedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(prefix)) {
+        next.delete(prefix);
+      } else {
+        next.add(prefix);
+      }
+      localStorage.setItem(pinnedStorageKey, JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
 
   // Fetch sessions for this project (poll to pick up color changes etc.)
   const fetchSessions = useCallback(async () => {
@@ -96,7 +123,6 @@ export const ProjectOverview: React.FC = () => {
   // Fetch metrics for each session
   useEffect(() => {
     if (sessions.length === 0) return;
-    const apiUrl = API_BASE_URL;
 
     sessions.forEach(async (session) => {
       try {
@@ -124,7 +150,7 @@ export const ProjectOverview: React.FC = () => {
     const runningSessions = sessions.filter(s => s.status === 'running');
     runningSessions.forEach((session) => {
       const es = new EventSource(
-        `${apiUrl}/api/sessions/${session.id}/metrics/stream`,
+        `${API_BASE_URL}/api/sessions/${session.id}/metrics/stream`,
         { withCredentials: true }
       );
       es.onmessage = (event) => {
@@ -256,6 +282,13 @@ export const ProjectOverview: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-white">
+      <MultiSeriesDetailModal
+        open={detailMetric !== null}
+        onClose={() => setDetailMetric(null)}
+        metricKey={detailMetric ?? ""}
+        sessions={visibleSessions}
+      />
+
       {/* Search + expand/collapse toolbar */}
       <div className="px-4 h-14 border-b border-gray-200 flex items-center gap-3 bg-white flex-shrink-0">
         <div className="flex-1 relative">
@@ -328,11 +361,18 @@ export const ProjectOverview: React.FC = () => {
             className="h-32"
           />
         ) : (
-          filteredGroupKeys.map((prefix) => {
+          [...filteredGroupKeys].sort((a, b) => {
+            const aPinned = pinnedSections.has(a);
+            const bPinned = pinnedSections.has(b);
+            if (aPinned && !bPinned) return -1;
+            if (!aPinned && bPinned) return 1;
+            return 0;
+          }).map((prefix) => {
             const metricKeys = filteredGrouped.get(prefix)!;
             const isExpanded = expandedGroups.has(prefix);
             const totalCount = grouped.get(prefix)?.length ?? 0;
             const isFiltering = searchQuery.trim().length > 0;
+            const isPinned = pinnedSections.has(prefix);
             return (
               <CollapsibleSection
                 key={prefix}
@@ -344,19 +384,30 @@ export const ProjectOverview: React.FC = () => {
                   </h3>
                 }
                 rightLabel={
-                  isFiltering ? (
-                    <>
-                      <span className="text-accent-600 font-medium">
-                        {metricKeys.length}
-                      </span>{" "}
-                      / {totalCount}
-                    </>
-                  ) : (
-                    <>
-                      {metricKeys.length} metric
-                      {metricKeys.length !== 1 ? "s" : ""}
-                    </>
-                  )
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">
+                      {isFiltering ? (
+                        <>
+                          <span className="text-accent-600 font-medium">
+                            {metricKeys.length}
+                          </span>{" "}
+                          / {totalCount}
+                        </>
+                      ) : (
+                        <>
+                          {metricKeys.length} metric
+                          {metricKeys.length !== 1 ? "s" : ""}
+                        </>
+                      )}
+                    </span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleSectionPin(prefix); }}
+                      className={`p-0.5 transition-colors ${isPinned ? 'text-accent-500 hover:text-accent-700' : 'text-gray-300 hover:text-gray-500'}`}
+                      title={isPinned ? "Unpin section" : "Pin to top"}
+                    >
+                      <PushPinIcon size={14} fill={isPinned ? "currentColor" : "none"} />
+                    </button>
+                  </div>
                 }
                 contentClassName="px-4 pb-4 grid grid-cols-3 gap-3"
               >
@@ -365,6 +416,7 @@ export const ProjectOverview: React.FC = () => {
                     key={metricKey}
                     metricKey={metricKey}
                     sessions={visibleSessions}
+                    onExpand={setDetailMetric}
                   />
                 ))}
               </CollapsibleSection>
@@ -381,33 +433,19 @@ export const ProjectOverview: React.FC = () => {
 const MultiSeriesChart: React.FC<{
   metricKey: string;
   sessions: SessionMetrics[];
-}> = ({ metricKey, sessions }) => {
+  onExpand?: (metricKey: string) => void;
+}> = ({ metricKey, sessions, onExpand }) => {
   const displayName =
     metricKey.split("/").slice(1).join("/") || metricKey;
 
-  // Build chart data: merge all sessions' data points by step
-  const { chartData, seriesKeys } = useMemo(() => {
-    const stepMap = new Map<number, Record<string, number>>();
-    const keys: string[] = [];
-
-    sessions.forEach((sm) => {
-      const seriesKey = sm.session.id;
-      keys.push(seriesKey);
-      sm.metrics.forEach((metric) => {
-        if (metric.data[metricKey] === undefined) return;
-        const step = metric.step;
-        if (!stepMap.has(step)) stepMap.set(step, { step });
-        stepMap.get(step)![seriesKey] = metric.data[metricKey];
-      });
-    });
-
-    const data = Array.from(stepMap.values()).sort(
-      (a, b) => a.step - b.step
+  // Check if there's any data
+  const hasData = useMemo(() => {
+    return sessions.some((sm) =>
+      sm.metrics.some((m) => m.data[metricKey] !== undefined)
     );
-    return { chartData: data, seriesKeys: keys };
   }, [sessions, metricKey]);
 
-  if (chartData.length === 0) {
+  if (!hasData) {
     return (
       <div className="bg-white rounded-lg border border-gray-200 flex flex-col overflow-hidden">
         <div className="px-3 py-2 border-b border-gray-100">
@@ -424,88 +462,205 @@ const MultiSeriesChart: React.FC<{
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 flex flex-col overflow-hidden hover:border-gray-300 transition-colors">
-      <div className="px-3 py-2 border-b border-gray-100">
+      <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
         <span className="text-xs font-medium text-gray-700 font-mono truncate">
           {displayName}
         </span>
+        {onExpand && (
+          <button
+            onClick={() => onExpand(metricKey)}
+            className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
+            title="Expand chart"
+          >
+            <MaximizeIcon size={14} />
+          </button>
+        )}
       </div>
       <div className="h-44 p-1">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart
-            data={chartData}
-            margin={{ top: 10, right: 15, left: 10, bottom: 10 }}
-            style={{ outline: "none" }}
-            accessibilityLayer={false}
-          >
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
-            <XAxis
-              dataKey="step"
-              type="number"
-              domain={["dataMin", "dataMax"]}
-              allowDecimals={false}
-              tick={{ fontSize: 10, fill: "#737373" }}
-              tickLine={{ stroke: "#d4d4d4" }}
-              axisLine={{ stroke: "#d4d4d4" }}
-            />
-            <YAxis
-              tick={{ fontSize: 10, fill: "#737373" }}
-              tickLine={{ stroke: "#d4d4d4" }}
-              axisLine={{ stroke: "#d4d4d4" }}
-              domain={["auto", "auto"]}
-              padding={{ top: 10, bottom: 10 }}
-            />
-            <Tooltip
-              content={({ active, payload, label }) => {
-                if (!active || !payload || payload.length === 0) return null;
-                return (
-                  <div className="bg-white border border-gray-200 rounded shadow-sm p-2 text-xs">
-                    <div className="font-semibold mb-1">Step {label}</div>
-                    {payload.map((entry: any) => {
-                      const sm = sessions.find(
-                        (s) => s.session.id === entry.dataKey
-                      );
-                      return (
-                        <div
-                          key={entry.dataKey}
-                          className="flex items-center gap-1.5"
-                        >
-                          <span
-                            className="w-2 h-2 rounded-full inline-block"
-                            style={{ backgroundColor: entry.color }}
-                          />
-                          <span className="text-gray-600 truncate max-w-[120px]">
-                            {sm?.session.experiment ?? "?"}
-                          </span>
-                          <span className="font-mono ml-auto">
-                            {typeof entry.value === "number"
-                              ? entry.value.toFixed(4)
-                              : "N/A"}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              }}
-            />
-            {seriesKeys.map((sessionId) => {
-              const sm = sessions.find((s) => s.session.id === sessionId);
-              return (
-                <Line
-                  key={sessionId}
-                  type="monotone"
-                  dataKey={sessionId}
-                  stroke={sm?.color ?? "#999"}
-                  strokeWidth={1.5}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-              );
-            })}
-          </LineChart>
-        </ResponsiveContainer>
+        <MultiSeriesChartContent metricKey={metricKey} sessions={sessions} />
       </div>
     </div>
+  );
+};
+
+/* ─── Multi-Series Detail Modal ──────────────────────────────────── */
+
+const MultiSeriesDetailModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  metricKey: string;
+  sessions: SessionMetrics[];
+}> = ({ open, onClose, metricKey, sessions }) => {
+  // Collect all unique steps across sessions for this metric
+  const steps = useMemo(() => {
+    const stepSet = new Set<number>();
+    sessions.forEach((sm) => {
+      sm.metrics.forEach((m) => {
+        if (m.data[metricKey] !== undefined) stepSet.add(m.step);
+      });
+    });
+    return Array.from(stepSet).sort((a, b) => a - b);
+  }, [sessions, metricKey]);
+
+  return (
+    <ChartDetailModal
+      open={open}
+      onClose={onClose}
+      metricKey={metricKey}
+      steps={steps}
+      renderChart={(xDomainMin, xDomainMax, onBrushChange) => (
+        <MultiSeriesChartContent
+          metricKey={metricKey}
+          sessions={sessions}
+          xDomainMin={xDomainMin}
+          xDomainMax={xDomainMax}
+          showBrush
+          onBrushChange={onBrushChange}
+        />
+      )}
+    />
+  );
+};
+
+/** Shared multi-series recharts content used in both card and modal. */
+const MultiSeriesChartContent: React.FC<{
+  metricKey: string;
+  sessions: SessionMetrics[];
+  xDomainMin?: number;
+  xDomainMax?: number;
+  showBrush?: boolean;
+  onBrushChange?: (startIndex: number, endIndex: number) => void;
+}> = ({ metricKey, sessions, xDomainMin, xDomainMax, showBrush = false, onBrushChange }) => {
+  const { chartData, seriesKeys } = useMemo(() => {
+    const stepMap = new Map<number, Record<string, number>>();
+    const keys: string[] = [];
+
+    sessions.forEach((sm) => {
+      const seriesKey = sm.session.id;
+      keys.push(seriesKey);
+      sm.metrics.forEach((metric) => {
+        if (metric.data[metricKey] === undefined) return;
+        const step = metric.step;
+        if (!stepMap.has(step)) stepMap.set(step, { step });
+        stepMap.get(step)![seriesKey] = metric.data[metricKey];
+      });
+    });
+
+    const data = Array.from(stepMap.values()).sort((a, b) => a.step - b.step);
+    return { chartData: data, seriesKeys: keys };
+  }, [sessions, metricKey]);
+
+  const xDomain: [any, any] = [
+    xDomainMin ?? "dataMin",
+    xDomainMax ?? "dataMax",
+  ];
+
+  return (
+    <>
+    {showBrush && (
+      <style>{`
+        .brush-slider .recharts-brush-slide {
+          fill: #3f72af !important;
+          fill-opacity: 0.15 !important;
+          rx: 2 !important;
+          height: 4px !important;
+          transform: translateY(7px);
+        }
+        .brush-slider > rect:first-child {
+          fill: #e5e7eb !important;
+          rx: 2 !important;
+          height: 4px !important;
+          transform: translateY(7px);
+        }
+      `}</style>
+    )}
+    <ResponsiveContainer width="100%" height="100%">
+      <LineChart
+        data={chartData}
+        margin={{ top: 10, right: 15, left: 10, bottom: showBrush ? 5 : 10 }}
+        style={{ outline: "none" }}
+        accessibilityLayer={false}
+      >
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
+        <XAxis
+          dataKey="step"
+          type="number"
+          domain={xDomain}
+          allowDecimals={false}
+          tick={{ fontSize: 11, fill: "#737373" }}
+          tickLine={{ stroke: "#d4d4d4" }}
+          axisLine={{ stroke: "#d4d4d4" }}
+        />
+        <YAxis
+          tick={{ fontSize: 11, fill: "#737373" }}
+          tickLine={{ stroke: "#d4d4d4" }}
+          axisLine={{ stroke: "#d4d4d4" }}
+          domain={["auto", "auto"]}
+          padding={{ top: 10, bottom: 10 }}
+        />
+        <Tooltip
+          content={({ active, payload, label }) => {
+            if (!active || !payload || payload.length === 0) return null;
+            return (
+              <div className="bg-white border border-gray-200 rounded shadow-sm p-2 text-xs">
+                <div className="font-semibold mb-1">Step {label}</div>
+                {payload.map((entry: any) => {
+                  const sm = sessions.find((s) => s.session.id === entry.dataKey);
+                  return (
+                    <div key={entry.dataKey} className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: entry.color }} />
+                      <span className="text-gray-600 truncate max-w-[160px]">{sm?.session.experiment ?? "?"}</span>
+                      <span className="font-mono ml-auto">{typeof entry.value === "number" ? entry.value.toFixed(4) : "N/A"}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          }}
+        />
+        {seriesKeys.map((sessionId) => {
+          const sm = sessions.find((s) => s.session.id === sessionId);
+          return (
+            <Line
+              key={sessionId}
+              type="monotone"
+              dataKey={sessionId}
+              stroke={sm?.color ?? "#999"}
+              strokeWidth={1.5}
+              dot={false}
+              connectNulls
+              isAnimationActive={false}
+            />
+          );
+        })}
+        {showBrush && chartData.length > 1 && (
+          <Brush
+            dataKey="step"
+            height={18}
+            stroke="none"
+            fill="transparent"
+            travellerWidth={14}
+            tickFormatter={() => ""}
+            className="brush-slider"
+            traveller={(props: any) => {
+              const { x, y, width, height } = props;
+              const cx = x + width / 2;
+              const cy = y + height / 2;
+              return (
+                <g cursor="ew-resize">
+                  <circle cx={cx} cy={cy} r={7} fill="#3f72af" stroke="white" strokeWidth={2} />
+                </g>
+              );
+            }}
+            onChange={(range: any) => {
+              if (onBrushChange && range) {
+                onBrushChange(range.startIndex, range.endIndex);
+              }
+            }}
+          />
+        )}
+      </LineChart>
+    </ResponsiveContainer>
+    </>
   );
 };
