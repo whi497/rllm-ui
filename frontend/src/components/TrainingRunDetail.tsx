@@ -135,7 +135,21 @@ export const TrainingRunDetail: React.FC = () => {
   const [leftPanelWidth, setLeftPanelWidth] = useState(320);
   const [rightPanelWidth, setRightPanelWidth] = useState(384);
   const [isDragging, setIsDragging] = useState<'left' | 'right' | null>(null);
+  const [isAgentCollapsed, setIsAgentCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('agentPanelCollapsed') === 'true';
+    }
+    return false;
+  });
+  const [isMetricsCollapsed, setIsMetricsCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('metricsPanelCollapsed') === 'true';
+    }
+    return false;
+  });
   const containerRef = useRef<HTMLDivElement>(null);
+  const preCollapseWidthRef = useRef(384);
+  const preCollapseLeftWidthRef = useRef(320);
 
   const handleMouseDown = useCallback((divider: 'left' | 'right') => {
     setIsDragging(divider);
@@ -148,13 +162,40 @@ export const TrainingRunDetail: React.FC = () => {
     const mouseX = e.clientX - containerRect.left;
     
     if (isDragging === 'left') {
-      const newWidth = Math.max(200, Math.min(500, mouseX));
-      setLeftPanelWidth(newWidth);
+      if (mouseX < 200) {
+        if (!isMetricsCollapsed) {
+          setIsMetricsCollapsed(true);
+          setLeftPanelWidth(36);
+          localStorage.setItem('metricsPanelCollapsed', 'true');
+        }
+      } else {
+        if (isMetricsCollapsed) {
+          setIsMetricsCollapsed(false);
+          localStorage.setItem('metricsPanelCollapsed', 'false');
+        }
+        const newWidth = Math.min(500, mouseX);
+        setLeftPanelWidth(newWidth);
+        preCollapseLeftWidthRef.current = newWidth;
+      }
     } else if (isDragging === 'right') {
-      const newWidth = Math.max(250, Math.min(600, containerRect.width - mouseX));
-      setRightPanelWidth(newWidth);
+      const rawWidth = containerRect.width - mouseX;
+      if (rawWidth < 250) {
+        if (!isAgentCollapsed) {
+          setIsAgentCollapsed(true);
+          setRightPanelWidth(36);
+          localStorage.setItem('agentPanelCollapsed', 'true');
+        }
+      } else {
+        if (isAgentCollapsed) {
+          setIsAgentCollapsed(false);
+          localStorage.setItem('agentPanelCollapsed', 'false');
+        }
+        const newWidth = Math.min(600, rawWidth);
+        setRightPanelWidth(newWidth);
+        preCollapseWidthRef.current = newWidth;
+      }
     }
-  }, [isDragging]);
+  }, [isDragging, isAgentCollapsed, isMetricsCollapsed]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(null);
@@ -449,122 +490,170 @@ export const TrainingRunDetail: React.FC = () => {
             onExpandedGroupsChange={setChartExpandedGroups}
             hasAutoExpanded={chartHasAutoExpanded}
             onHasAutoExpandedChange={setChartHasAutoExpanded}
+            pinnedStorageKey={`pinnedSections:run:${sessionId}`}
           />
         ) : activeTab === "training" ? (
           <div 
             ref={containerRef}
             style={{ height: '100%', display: 'flex' }}
           >
-            {/* Left Panel - Charts */}
-            <div 
-              style={{ 
-                width: `${leftPanelWidth}px`, 
-                flexShrink: 0, 
-                display: 'flex',
-                flexDirection: 'column',
-                borderRight: '1px solid #e5e7eb'
-              }}
-              className="bg-white"
-            >
-              <div className="px-4 h-14 border-b border-gray-200 flex items-center justify-between" style={{ flexShrink: 0 }}>
-                <span className="text-sm font-medium text-gray-900">Metrics</span>
-                <span className="text-sm text-gray-500">
-                  {selectedMetrics.length} chart{selectedMetrics.length !== 1 ? 's' : ''}
+            {/* Left Panel - Metrics */}
+            {isMetricsCollapsed ? (
+              <div
+                onClick={() => {
+                  setIsMetricsCollapsed(false);
+                  setLeftPanelWidth(preCollapseLeftWidthRef.current);
+                  localStorage.setItem('metricsPanelCollapsed', 'false');
+                }}
+                className="bg-gray-50 flex items-start justify-center cursor-pointer hover:bg-gray-200 transition-colors border-r border-gray-200"
+                style={{ width: '36px', flexShrink: 0, paddingTop: '16px' }}
+              >
+                <span
+                  className="text-xs font-medium text-gray-500 tracking-widest"
+                  style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                >
+                  METRICS
                 </span>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto' }} className="p-2 space-y-2">
-                {selectedMetrics.map((metric, index) => (
-                  <div key={index} className="bg-layer-1 rounded-lg border border-gray-200 flex flex-col">
-                    {/* Chart Header */}
-                    <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between gap-2">
-                      <div
-                        className="relative flex-shrink-0"
-                        onMouseEnter={() => setOpenMetricDropdown(index)}
-                        onMouseLeave={() => setOpenMetricDropdown(null)}
-                      >
-                        <button
-                          className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-gray-700 bg-white hover:bg-layer-2 rounded border border-gray-200 transition-colors"
+            ) : (
+              <div
+                style={{
+                  width: `${leftPanelWidth}px`,
+                  flexShrink: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  borderRight: '1px solid #e5e7eb'
+                }}
+                className="bg-white"
+              >
+                <div className="px-4 h-14 border-b border-gray-200 flex items-center justify-between" style={{ flexShrink: 0 }}>
+                  <span className="text-sm font-medium text-gray-900">Metrics</span>
+                  <span className="text-sm text-gray-500">
+                    {selectedMetrics.length} chart{selectedMetrics.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto' }} className="p-2 space-y-2">
+                  {selectedMetrics.map((metric, index) => (
+                    <div key={index} className="bg-layer-1 rounded-lg border border-gray-200 flex flex-col">
+                      {/* Chart Header */}
+                      <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between gap-2">
+                        <div
+                          className="relative flex-shrink-0"
+                          onMouseEnter={() => setOpenMetricDropdown(index)}
+                          onMouseLeave={() => setOpenMetricDropdown(null)}
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                          </svg>
-                          Select
-                        </button>
-                        <MetricSelectorModal
-                          isOpen={openMetricDropdown === index}
-                          onClose={() => setOpenMetricDropdown(null)}
-                          availableMetrics={getAvailableMetrics(metrics)}
-                          selectedMetric={metric}
-                          onSelectionChange={(m) => m && updateMetric(index, m)}
-                        />
-                      </div>
-                      <div className="flex items-center gap-1 min-w-0 flex-1 justify-end">
-                        <span className="text-xs text-gray-500 font-mono truncate">
-                          {metric}
-                        </span>
-                        {selectedMetrics.length > 1 && (
                           <button
-                            onClick={() => removeMetricChart(index)}
-                            className="p-0.5 text-gray-400 hover:text-red-500 transition-colors"
-                            title="Remove chart"
+                            className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-gray-700 bg-white hover:bg-layer-2 rounded border border-gray-200 transition-colors"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                             </svg>
+                            Select
                           </button>
-                        )}
+                          <MetricSelectorModal
+                            isOpen={openMetricDropdown === index}
+                            onClose={() => setOpenMetricDropdown(null)}
+                            availableMetrics={getAvailableMetrics(metrics)}
+                            selectedMetric={metric}
+                            onSelectionChange={(m) => m && updateMetric(index, m)}
+                          />
+                        </div>
+                        <div className="flex items-center gap-1 min-w-0 flex-1 justify-end">
+                          <span className="text-xs text-gray-500 font-mono truncate">
+                            {metric}
+                          </span>
+                          {selectedMetrics.length > 1 && (
+                            <button
+                              onClick={() => removeMetricChart(index)}
+                              className="p-0.5 text-gray-400 hover:text-red-500 transition-colors"
+                              title="Remove chart"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Chart */}
+                      <div className="h-40 p-2 bg-white">
+                        <RewardChart
+                          metrics={metrics}
+                          selectedMetric={metric}
+                          selectedStep={selectedStep}
+                          onStepClick={handleStepClick}
+                          color={experimentColor}
+                        />
                       </div>
                     </div>
+                  ))}
 
-                    {/* Chart */}
-                    <div className="h-40 p-2 bg-white">
-                      <RewardChart
-                        metrics={metrics}
-                        selectedMetric={metric}
-                        selectedStep={selectedStep}
-                        onStepClick={handleStepClick}
-                        color={experimentColor}
-                      />
-                    </div>
-                  </div>
-                ))}
-
-                {/* Add Chart Button */}
-                <button
-                  onClick={addMetricChart}
-                  disabled={getAvailableMetrics(metrics).length <= selectedMetrics.length}
-                  className="w-full py-2 px-3 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add Chart
-                </button>
+                  {/* Add Chart Button */}
+                  <button
+                    onClick={addMetricChart}
+                    disabled={getAvailableMetrics(metrics).length <= selectedMetrics.length}
+                    className="w-full py-2 px-3 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add Chart
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Left Resizer */}
             <div
               onMouseDown={() => handleMouseDown('left')}
               style={{
-                width: '4px',
+                width: '8px',
+                marginLeft: '-4px',
+                marginRight: '-4px',
                 cursor: 'col-resize',
-                backgroundColor: isDragging === 'left' ? '#3f72af' : 'transparent',
-                transition: 'background-color 0.15s',
+                position: 'relative',
+                zIndex: 10,
               }}
-              className="hover:bg-accent-500 flex-shrink-0"
-            />
+              className="flex-shrink-0 group"
+            >
+              {/* Thin center line on hover/drag */}
+              <div
+                className={`absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 transition-colors ${isDragging === 'left' ? 'bg-accent-500' : 'group-hover:bg-accent-400 bg-transparent'}`}
+              />
+              {/* Drag handle indicator — flat pill with arrows */}
+              <div
+                className="bg-gray-100 border border-gray-200 group-hover:bg-accent-500 group-hover:border-accent-500 transition-colors"
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: '16px',
+                  height: '26px',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  pointerEvents: 'none',
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-gray-400 group-hover:text-white transition-colors">
+                  <path d="M4 3.5L2 6L4 8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M8 3.5L10 6L8 8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+            </div>
 
             {/* Middle Panel - Episodes */}
-            <div 
-              style={{ 
-                flex: 1, 
-                minWidth: 0, 
-                display: 'flex', 
-                flexDirection: 'column', 
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: 'flex',
+                flexDirection: 'column',
                 overflow: 'hidden',
-                borderRight: '1px solid #e5e7eb'
-              }} 
+              }}
               className="bg-white"
             >
               <div className="px-4 h-14 border-b border-gray-200 flex items-center justify-between" style={{ flexShrink: 0 }}>
@@ -600,71 +689,119 @@ export const TrainingRunDetail: React.FC = () => {
               </div>
             </div>
 
-            {/* Right Resizer */}
+            {/* Right Resizer — overlays the border, no layout gap */}
             <div
               onMouseDown={() => handleMouseDown('right')}
               style={{
-                width: '4px',
+                width: '8px',
+                marginLeft: '-4px',
+                marginRight: '-4px',
                 cursor: 'col-resize',
-                backgroundColor: isDragging === 'right' ? '#3f72af' : 'transparent',
-                transition: 'background-color 0.15s',
+                position: 'relative',
+                zIndex: 10,
               }}
-              className="hover:bg-accent-500 flex-shrink-0"
-            />
-
-            {/* Right Panel - Agent */}
-            <div 
-              style={{ 
-                width: `${rightPanelWidth}px`, 
-                flexShrink: 0, 
-                display: 'flex', 
-                flexDirection: 'column', 
-                overflow: 'hidden' 
-              }} 
-              className="bg-white"
+              className="flex-shrink-0 group"
             >
-              <div className="px-4 h-14 border-b border-gray-200 flex items-center justify-between" style={{ flexShrink: 0 }}>
-                <span className="text-sm font-medium text-gray-900">Agent</span>
-                {sessionId && (
-                  <ChatSessionMenu
-                    sessionId={sessionId}
-                    activeChatSessionId={activeChatSessionId}
-                    onSelect={(id) => setActiveChatSessionId(id)}
-                    onNew={async () => {
-                      try {
-                        const res = await apiFetch("/api/agent/sessions", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ session_id: sessionId }),
-                        });
-                        if (res.ok) {
-                          const cs = await res.json();
-                          setActiveChatSessionId(cs.id);
-                        }
-                      } catch { /* ignore */ }
-                    }}
-                    onDelete={async (id) => {
-                      try {
-                        await apiFetch(`/api/agent/sessions/${id}`, { method: "DELETE" });
-                        if (id === activeChatSessionId) {
-                          // Switch to another session or clear
-                          const res = await apiFetch(`/api/agent/sessions?session_id=${sessionId}`);
-                          const sessions = res.ok ? await res.json() : [];
-                          setActiveChatSessionId(sessions.length > 0 ? sessions[0].id : null);
-                        }
-                      } catch { /* ignore */ }
-                    }}
-                  />
-                )}
-              </div>
-              <div style={{ flex: 1, overflowY: 'auto' }}>
-                <ChatPanel
-                  sessionId={sessionId}
-                  activeChatSessionId={activeChatSessionId}
-                  onChatSessionIdChange={setActiveChatSessionId}
-                />
+              {/* Thin center line on hover/drag */}
+              <div
+                className={`absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 transition-colors ${isDragging === 'right' ? 'bg-accent-500' : 'group-hover:bg-accent-400 bg-transparent'}`}
+              />
+              {/* Drag handle indicator — flat pill with arrows */}
+              <div
+                className="bg-gray-100 border border-gray-200 group-hover:bg-accent-500 group-hover:border-accent-500 transition-colors"
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: '16px',
+                  height: '26px',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  pointerEvents: 'none',
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-gray-400 group-hover:text-white transition-colors">
+                  <path d="M4 3.5L2 6L4 8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M8 3.5L10 6L8 8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
               </div>
             </div>
+
+            {/* Right Panel - Agent */}
+            {isAgentCollapsed ? (
+              <div
+                onClick={() => {
+                  setIsAgentCollapsed(false);
+                  setRightPanelWidth(preCollapseWidthRef.current);
+                  localStorage.setItem('agentPanelCollapsed', 'false');
+                }}
+                className="bg-gray-50 flex items-start justify-center cursor-pointer hover:bg-gray-200 transition-colors border-l border-gray-200"
+                style={{ width: '36px', flexShrink: 0, paddingTop: '16px' }}
+              >
+                <span
+                  className="text-xs font-medium text-gray-500 tracking-widest"
+                  style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                >
+                  AGENT
+                </span>
+              </div>
+            ) : (
+              <div
+                style={{
+                  width: `${rightPanelWidth}px`,
+                  flexShrink: 0,
+                  display: 'flex',
+                  borderLeft: '1px solid #e5e7eb',
+                  flexDirection: 'column',
+                  overflow: 'hidden'
+                }}
+                className="bg-white"
+              >
+                <div className="px-4 h-14 border-b border-gray-200 flex items-center justify-between" style={{ flexShrink: 0 }}>
+                  <span className="text-sm font-medium text-gray-900">Agent</span>
+                  {sessionId && (
+                    <ChatSessionMenu
+                      sessionId={sessionId}
+                      activeChatSessionId={activeChatSessionId}
+                      onSelect={(id) => setActiveChatSessionId(id)}
+                      onNew={async () => {
+                        try {
+                          const res = await apiFetch("/api/agent/sessions", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ session_id: sessionId }),
+                          });
+                          if (res.ok) {
+                            const cs = await res.json();
+                            setActiveChatSessionId(cs.id);
+                          }
+                        } catch { /* ignore */ }
+                      }}
+                      onDelete={async (id) => {
+                        try {
+                          await apiFetch(`/api/agent/sessions/${id}`, { method: "DELETE" });
+                          if (id === activeChatSessionId) {
+                            const res = await apiFetch(`/api/agent/sessions?session_id=${sessionId}`);
+                            const sessions = res.ok ? await res.json() : [];
+                            setActiveChatSessionId(sessions.length > 0 ? sessions[0].id : null);
+                          }
+                        } catch { /* ignore */ }
+                      }}
+                    />
+                  )}
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  <ChatPanel
+                    sessionId={sessionId}
+                    activeChatSessionId={activeChatSessionId}
+                    onChatSessionIdChange={setActiveChatSessionId}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         ) : activeTab === "logs" ? (
           <LogsPanel logs={logs} isLoading={logsLoading} />
