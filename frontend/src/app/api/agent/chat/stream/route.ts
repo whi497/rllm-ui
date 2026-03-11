@@ -1,5 +1,8 @@
 import { NextRequest } from "next/server";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
   const body = await req.text();
@@ -43,9 +46,10 @@ export async function POST(req: NextRequest) {
   return new Response(stream, {
     status: backendRes.status,
     headers: {
-      "Content-Type": "text/event-stream",
+      "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "Content-Encoding": "none",
       "X-Accel-Buffering": "no",
     },
   });
