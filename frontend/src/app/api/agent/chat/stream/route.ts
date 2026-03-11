@@ -26,31 +26,11 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Explicitly pipe chunks through a new stream to force per-chunk flushing.
-  // Passing backendRes.body directly can get buffered by Next.js standalone server.
-  const reader = backendRes.body.getReader();
-  const stream = new ReadableStream({
-    async pull(controller) {
-      const { done, value } = await reader.read();
-      if (done) {
-        controller.close();
-      } else {
-        controller.enqueue(value);
-      }
-    },
-    cancel() {
-      reader.cancel();
-    },
-  });
-
-  return new Response(stream, {
+  return new Response(backendRes.body, {
     status: backendRes.status,
     headers: {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "Content-Encoding": "none",
-      "X-Accel-Buffering": "no",
     },
   });
 }
