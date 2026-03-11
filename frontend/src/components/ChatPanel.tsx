@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { apiFetch } from "../config/api";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -34,13 +35,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [currentTool, setCurrentTool] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(
     () => localStorage.getItem(MODEL_STORAGE_KEY) || MODEL_OPTIONS[1].value
   );
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [apiKeyError, setApiKeyError] = useState<"missing" | "invalid" | null>(null);
+  const [currentTool, setCurrentTool] = useState<string | null>(null);
 
   const { config } = useAuth();
   const router = useRouter();
@@ -355,7 +356,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             ) : (
               <div className="w-[90%] prose prose-sm max-w-none text-gray-900">
                 {msg.content ? (
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                 ) : isLoading && index === messages.length - 1 ? (
                   <div className="flex items-center gap-2 text-gray-500 not-prose">
                     <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-pulse" />
@@ -367,7 +368,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           </div>
         ))}
 
-        {/* Tool indicator */}
         {currentTool && (
           <div className="flex justify-start">
             <div className="bg-accent-50 border border-accent-200 px-3 py-2 rounded-lg">
