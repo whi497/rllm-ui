@@ -18,6 +18,7 @@ interface Session {
   project_id: string;
   project: string;
   experiment: string;
+  config: Record<string, unknown> | null;
   status: SessionStatus;
   session_type: string;
   created_at: string;
@@ -131,12 +132,13 @@ export const EvalPage: React.FC = () => {
     const q = searchQuery.toLowerCase();
     return rows.filter((r) => {
       const res = r.result;
+      const cfg = r.session.config;
       return (
         r.session.experiment.toLowerCase().includes(q) ||
         r.session.project.toLowerCase().includes(q) ||
-        (res?.dataset_name || "").toLowerCase().includes(q) ||
-        (res?.model || "").toLowerCase().includes(q) ||
-        (res?.agent || "").toLowerCase().includes(q)
+        (res?.dataset_name || (cfg?.benchmark as string) || "").toLowerCase().includes(q) ||
+        (res?.model || (cfg?.model as string) || "").toLowerCase().includes(q) ||
+        (res?.agent || (cfg?.agent as string) || "").toLowerCase().includes(q)
       );
     });
   }, [rows, searchQuery]);
@@ -148,11 +150,13 @@ export const EvalPage: React.FC = () => {
       let cmp = 0;
       const ar = a.result;
       const br = b.result;
+      const acfg = a.session.config;
+      const bcfg = b.session.config;
       switch (sortField) {
-        case "dataset": cmp = (ar?.dataset_name || "").localeCompare(br?.dataset_name || ""); break;
+        case "dataset": cmp = (ar?.dataset_name || (acfg?.benchmark as string) || "").localeCompare(br?.dataset_name || (bcfg?.benchmark as string) || ""); break;
         case "experiment": cmp = a.session.experiment.localeCompare(b.session.experiment); break;
-        case "model": cmp = (ar?.model || "").localeCompare(br?.model || ""); break;
-        case "agent": cmp = (ar?.agent || "").localeCompare(br?.agent || ""); break;
+        case "model": cmp = (ar?.model || (acfg?.model as string) || "").localeCompare(br?.model || (bcfg?.model as string) || ""); break;
+        case "agent": cmp = (ar?.agent || (acfg?.agent as string) || "").localeCompare(br?.agent || (bcfg?.agent as string) || ""); break;
         case "score": cmp = (ar?.score ?? -1) - (br?.score ?? -1); break;
         case "total": cmp = (ar?.total ?? 0) - (br?.total ?? 0); break;
         case "errors": cmp = (ar?.errors ?? 0) - (br?.errors ?? 0); break;
@@ -177,7 +181,7 @@ export const EvalPage: React.FC = () => {
   const datasetGroups = useMemo(() => {
     const map = new Map<string, EvalRow[]>();
     for (const row of filteredRows) {
-      const ds = row.result?.dataset_name || "Unknown";
+      const ds = row.result?.dataset_name || (row.session.config?.benchmark as string) || "Unknown";
       if (!map.has(ds)) map.set(ds, []);
       map.get(ds)!.push(row);
     }
@@ -297,10 +301,10 @@ export const EvalPage: React.FC = () => {
                       className="hover:bg-gray-50 cursor-pointer transition-colors"
                       onClick={() => router.push(`/evaluation/${row.session.id}`)}
                     >
-                      <td className="px-3 py-2.5 text-sm font-medium text-gray-900"><HighlightedText text={r?.dataset_name || "-"} searchQuery={searchQuery} /></td>
+                      <td className="px-3 py-2.5 text-sm font-medium text-gray-900"><HighlightedText text={r?.dataset_name || (row.session.config?.benchmark as string) || "-"} searchQuery={searchQuery} /></td>
                       <td className="px-3 py-2.5 text-sm text-gray-600"><HighlightedText text={row.session.experiment} searchQuery={searchQuery} /></td>
-                      <td className="px-3 py-2.5 text-sm text-gray-600 font-mono"><HighlightedText text={r?.model || "-"} searchQuery={searchQuery} /></td>
-                      <td className="px-3 py-2.5 text-sm text-gray-600"><HighlightedText text={r?.agent || "-"} searchQuery={searchQuery} /></td>
+                      <td className="px-3 py-2.5 text-sm text-gray-600 font-mono"><HighlightedText text={r?.model || (row.session.config?.model as string) || "-"} searchQuery={searchQuery} /></td>
+                      <td className="px-3 py-2.5 text-sm text-gray-600"><HighlightedText text={r?.agent || (row.session.config?.agent as string) || "-"} searchQuery={searchQuery} /></td>
                       <td className="px-3 py-2.5 text-sm font-semibold">
                         {r ? (
                           <span className={r.score >= 0.5 ? "text-green-600" : r.score >= 0.2 ? "text-amber-600" : "text-red-600"}>
