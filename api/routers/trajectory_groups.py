@@ -28,6 +28,26 @@ def create_trajectory_group(request: Request, group: TrajectoryGroupCreate, user
     raise HTTPException(status_code=500, detail="Failed to store trajectory group")
 
 
+@router.post("/trajectory-groups/batch")
+async def batch_create_trajectory_groups(request: Request, user: CurrentUser):
+    """Receive a batch of trajectory groups in a single request."""
+    body = await request.json()
+    session_id = body.get("session_id")
+    groups_data = body.get("groups", [])
+
+    store = request.app.state.store
+    session = store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    for gp_body in groups_data:
+        group = TrajectoryGroupCreate(**gp_body)
+        group_data = group.model_dump(mode="json")
+        store.append_trajectory_group(group.session_id, group_data)
+
+    return {"status": "ok", "count": len(groups_data)}
+
+
 @router.get("/trajectory-groups", response_model=TrajectoryGroupListResponse)
 def get_trajectory_groups(
     request: Request,
