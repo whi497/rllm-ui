@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import {
   ClipboardCheckIcon,
   SearchIcon,
+  DeleteIcon,
 } from "./icons";
 import { Spinner, EmptyState } from "./ui";
 import { HighlightedText } from "./HighlightedText";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { apiFetch } from "../config/api";
 import { usePolling } from "../hooks/usePolling";
 
@@ -86,6 +88,7 @@ export const EvalPage: React.FC = () => {
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [searchQuery, setSearchQuery] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
   const initialLoadDone = useRef(false);
 
   const fetchData = useCallback(async () => {
@@ -114,6 +117,14 @@ export const EvalPage: React.FC = () => {
       initialLoadDone.current = true;
     }
   }, []);
+
+  const handleDelete = useCallback(async (sessionId: string) => {
+    const res = await apiFetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+    if (res.ok) {
+      setDeleteConfirm(null);
+      fetchData();
+    }
+  }, [fetchData]);
 
   const hasRunning = sessions.some((s) => s.status === "running");
   usePolling(fetchData, { interval: hasRunning ? 5000 : 60000 });
@@ -290,6 +301,7 @@ export const EvalPage: React.FC = () => {
                   <SortHeader field="errors">Errors</SortHeader>
                   <SortHeader field="status">Status</SortHeader>
                   <SortHeader field="date">Date</SortHeader>
+                  <th className="px-3 py-3 w-10" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -320,6 +332,18 @@ export const EvalPage: React.FC = () => {
                       </td>
                       <td className="px-3 py-2.5"><StatusBadge status={row.session.status} /></td>
                       <td className="px-3 py-2.5 text-sm text-gray-400">{formatDate(row.session.created_at)}</td>
+                      <td className="px-3 py-2.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteConfirm({ id: row.session.id, name: row.session.experiment });
+                          }}
+                          className="p-1 rounded-md text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                          title="Delete"
+                        >
+                          <DeleteIcon size={16} />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -341,6 +365,14 @@ export const EvalPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!deleteConfirm}
+        title="Delete evaluation run?"
+        message={`This will permanently delete "${deleteConfirm?.name}" and all its episodes and results.`}
+        onConfirm={() => deleteConfirm && handleDelete(deleteConfirm.id)}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 };
