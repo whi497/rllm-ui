@@ -105,6 +105,7 @@ export const TrainingRunDetail: React.FC = () => {
 
   const [session, setSession] = useState<Session | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [episodesLoading, setEpisodesLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<
     "charts" | "training" | "logs" | "metadata" | "workflow"
   >("charts");
@@ -267,6 +268,8 @@ export const TrainingRunDetail: React.FC = () => {
       setEpisodes(data);
     } catch (err: any) {
       console.error("Error fetching episodes:", err);
+    } finally {
+      setEpisodesLoading(false);
     }
   }, [sessionId]);
 
@@ -690,6 +693,7 @@ export const TrainingRunDetail: React.FC = () => {
                   episodes={episodes}
                   selectedStep={selectedStep}
                   sessionId={sessionId}
+                  loading={episodesLoading}
                   viewMode={episodeViewMode}
                   onViewModeChange={setEpisodeViewMode}
                 />

@@ -333,7 +333,7 @@ export const EvalRunDetail: React.FC = () => {
             episodes={normalizedEpisodes}
             selectedStep={0}
             sessionId={sessionId}
-            loading={false}
+            loading={loading}
             hideStepLabel
           />
         ) : (
