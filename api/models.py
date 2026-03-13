@@ -1,7 +1,7 @@
 """Pydantic models for API request/response validation."""
 
 from datetime import datetime
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel
 
@@ -262,6 +262,20 @@ class UserResponse(BaseModel):
     email: str
     name: str | None = None
     api_key: str | None = None
+    team: str | None = None
+    is_superuser: bool = False
+    impersonating: bool = False
+
+
+class AdminUserResponse(BaseModel):
+    """User record for the admin user list (no sensitive fields)."""
+    id: str
+    email: str
+    name: str | None = None
+    team: str | None = None
+    is_superuser: bool = False
+    oauth_provider: str | None = None
+    created_at: datetime
 
 
 class AuthConfigResponse(BaseModel):
@@ -294,4 +308,230 @@ class EvalResultCreate(BaseModel):
 
 class EvalResultResponse(EvalResultCreate):
     id: str
+    created_at: datetime
+
+
+# Agent session models (ClickHouse-backed)
+class AgentSessionCreate(BaseModel):
+    name: str = ""
+    metadata: dict[str, Any] | None = None
+
+
+class AgentSessionResponse(BaseModel):
+    id: str
+    name: str
+    status: str = "running"
+    metadata: dict[str, Any] | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+
+
+class AgentTrajectoryIngest(BaseModel):
+    """Mirrors the NDJSON export TraceEnvelope: {"type": "trajectory.*", "data": {...}}"""
+
+    type: Literal["trajectory.start", "trajectory.step", "trajectory.end"]
+    data: dict[str, Any]
+
+
+class AgentTrajectoryResponse(BaseModel):
+    id: str
+    agent_session_id: str
+    span_type: str
+    trajectory_uid: str
+    agent_name: str = ""
+    data: dict[str, Any]
+    created_at: datetime
+
+
+# Agent span models (ClickHouse-backed, real-time observability)
+class SpanIngest(BaseModel):
+    """Mirrors TraceEnvelope: {"type": "<span_type>", "data": {...}}"""
+
+    type: str
+    data: dict[str, Any]
+
+
+class SpanResponse(BaseModel):
+    id: str
+    agent_session_id: str
+    span_type: str
+    span_id: str
+    invocation_id: str = ""
+    agent_name: str = ""
+    model: str = ""
+    tool_name: str = ""
+    duration_ms: float | None = None
+    error: str = ""
+    data: dict[str, Any]
+    created_at: datetime
+
+
+# Agent dashboard aggregate models
+class DashboardStats(BaseModel):
+    total_spans: int = 0
+    llm_calls: int = 0
+    tool_calls: int = 0
+    invocations: int = 0
+    total_tokens: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    avg_llm_latency_ms: float = 0
+    avg_tool_latency_ms: float = 0
+    error_count: int = 0
+
+
+class TimeseriesBucket(BaseModel):
+    bucket: datetime
+    total: int = 0
+    llm_calls: int = 0
+    tool_calls: int = 0
+    agent_spans: int = 0
+    tokens: int = 0
+    errors: int = 0
+
+
+class ModelUsage(BaseModel):
+    model: str
+    call_count: int = 0
+    total_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    avg_latency_ms: float = 0
+
+
+class ToolUsage(BaseModel):
+    tool_name: str
+    call_count: int = 0
+    avg_latency_ms: float = 0
+    error_count: int = 0
+
+
+class SessionCounts(BaseModel):
+    total: int = 0
+    running: int = 0
+    completed: int = 0
+    failed: int = 0
+
+
+class DashboardResponse(BaseModel):
+    stats: DashboardStats
+    timeseries: list[TimeseriesBucket]
+    models: list[ModelUsage]
+    tools: list[ToolUsage]
+    sessions: SessionCounts
+
+
+# Skill distillation models
+class SkillCreate(BaseModel):
+    title: str
+    description: str
+    category: str = "general"
+    confidence: float = 0.0
+    reward_delta: float = 0.0
+    success_rate: str = ""
+    evidence_count: int = 0
+    source_session_ids: list[str] = []
+    tags: list[str] = []
+    metadata: dict[str, Any] | None = None
+
+
+class SkillResponse(BaseModel):
+    id: str
+    title: str
+    description: str
+    category: str
+    confidence: float
+    reward_delta: float
+    success_rate: str
+    evidence_count: int
+    source_session_ids: list[str]
+    tags: list[str]
+    is_active: bool = False
+    metadata: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SkillUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    category: str | None = None
+    is_active: bool | None = None
+    tags: list[str] | None = None
+
+
+# Paginated response wrappers
+class PaginatedSessionsResponse(BaseModel):
+    items: list[AgentSessionResponse]
+    total: int
+    offset: int
+    limit: int
+
+
+class PaginatedSpansResponse(BaseModel):
+    items: list[SpanResponse]
+    total: int
+    offset: int
+    limit: int
+
+
+class DistillRequest(BaseModel):
+    session_ids: list[str]
+    source: str = "clickhouse"
+
+
+# Span upload models (agent span CSV import)
+class SpanUploadResponse(BaseModel):
+    upload_id: str
+    filename: str
+    row_count: int
+    session_count: int
+    created_at: datetime
+
+
+class SpanUploadSessionResponse(BaseModel):
+    id: str
+    name: str
+    status: str
+    span_count: int
+    created_at: datetime
+    completed_at: datetime | None = None
+
+
+# Eval explorer models (joined eval rows + session metadata)
+class EvalExplorerSessionInfo(BaseModel):
+    name: str = ""
+    status: str = "unknown"
+    agent_name: str | None = None
+    span_count: int = 0
+    llm_calls: int = 0
+    tool_calls: int = 0
+    created_at: datetime | None = None
+
+
+class EvalExplorerRow(BaseModel):
+    id: int
+    upload_id: str
+    session_id: str
+    ground_truth: str
+    tags: str
+    created_at: datetime
+    session: EvalExplorerSessionInfo | None = None
+
+
+# Eval upload models (CSV import)
+class EvalUploadResponse(BaseModel):
+    upload_id: str
+    filename: str
+    row_count: int
+    created_at: datetime
+
+
+class EvalUploadRowResponse(BaseModel):
+    id: int
+    upload_id: str
+    session_id: str
+    agent_trajectory: str
+    ground_truth: str
+    tags: str
     created_at: datetime

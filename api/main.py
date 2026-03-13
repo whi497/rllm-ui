@@ -12,10 +12,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+
 from datastore.factory import get_datastore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import agent, auth, episodes, eval_results, health, logs, metrics, oauth, sessions, settings, sse, trajectory_groups
+from routers import admin, agent, agent_sessions, auth, episodes, eval_results, eval_uploads, health, logs, metrics, oauth, sessions, settings, skills, span_uploads, sse, trajectory_groups
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +62,52 @@ async def lifespan(app: FastAPI):
         logger.info("ANTHROPIC_API_KEY not set, Observability Agent disabled")
         app.state.agent = None
 
+    # Initialize ClickHouse client (optional — only if configured)
+    ch_host = os.environ.get("CLICKHOUSE_HOST")
+    if ch_host:
+        try:
+            from datastore.clickhouse_client import ClickHouseClient
+
+            app.state.clickhouse = ClickHouseClient()
+            app.state.clickhouse.init_tables()
+            logger.info("ClickHouse connected for agent trajectories")
+        except Exception as e:
+            logger.warning(f"Failed to connect to ClickHouse: {e}")
+            app.state.clickhouse = None
+    else:
+        app.state.clickhouse = None
+        logger.info("CLICKHOUSE_HOST not set, agent trajectory features disabled")
+
+    # Initialize PostgreSQL span client (always available if using Postgres)
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url and db_url.startswith("postgresql"):
+        try:
+            from datastore.postgres_span_store import PostgresSpanClient
+
+            app.state.postgres_spans = PostgresSpanClient(db_url)
+            logger.info("PostgreSQL span client initialized for imported agent traces")
+        except Exception as e:
+            logger.warning(f"Failed to initialize PostgreSQL span client: {e}")
+            app.state.postgres_spans = None
+    else:
+        app.state.postgres_spans = None
+        logger.info("PostgreSQL span client not initialized (no PostgreSQL DATABASE_URL)")
+
+    # Initialize BigQuery client (optional — only if configured)
+    bq_project = os.environ.get("BQ_PROJECT")
+    if bq_project:
+        try:
+            from datastore.bigquery_client import BigQueryClient
+
+            app.state.bigquery = BigQueryClient()
+            logger.info("BigQuery connected for agent trace reading")
+        except Exception as e:
+            logger.warning(f"Failed to connect to BigQuery: {e}")
+            app.state.bigquery = None
+    else:
+        app.state.bigquery = None
+        logger.info("BQ_PROJECT not set, BigQuery trace features disabled")
+
     # Start background crash detection loop
     async def crash_detection_loop():
         while True:
@@ -75,6 +126,12 @@ async def lifespan(app: FastAPI):
     # Shutdown
     crash_task.cancel()
     app.state.store.close()
+    if getattr(app.state, "postgres_spans", None):
+        app.state.postgres_spans.close()
+    if getattr(app.state, "clickhouse", None):
+        app.state.clickhouse.close()
+    if getattr(app.state, "bigquery", None):
+        app.state.bigquery.close()
 
 
 # Create FastAPI app
@@ -119,3 +176,8 @@ app.include_router(settings.router)
 app.include_router(logs.router)
 app.include_router(trajectory_groups.router)
 app.include_router(eval_results.router)
+app.include_router(eval_uploads.router)
+app.include_router(span_uploads.router)
+app.include_router(skills.router)
+app.include_router(agent_sessions.router)
+app.include_router(admin.router)

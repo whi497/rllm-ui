@@ -10,6 +10,7 @@ api/rllm_ui.db
 api/*.db
 api/.venv/
 api/.pytest_cache/
+api/pgdata/
 
 # Python
 **/__pycache__/

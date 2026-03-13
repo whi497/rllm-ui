@@ -37,10 +37,29 @@ export {
   ArrowUpRight as NorthEastIcon,
   // Expand/maximize icon for chart detail view
   Maximize2 as MaximizeIcon,
+  // Observability icons
+  Activity as ActivityIcon,
+  GitBranch as GitBranchIcon,
+  List as ListIcon,
+  ArrowDown as ArrowDownIcon,
+  MessageSquare as MessageSquareIcon,
+  Bot as BotIcon,
+  Cpu as CpuIcon,
+  Wrench as WrenchIcon,
+  Zap as ZapIcon,
+  // Admin icons
+  ShieldCheck as ShieldCheckIcon,
   // Eval icons
   ClipboardCheck as ClipboardCheckIcon,
   LayoutList as LayoutListIcon,
   Table as TableIcon,
   Filter as FilterIcon,
   Trophy as TrophyIcon,
+  // Skill distillation icons
+  Sparkles as SparklesIcon,
+  Download as DownloadIcon,
+  ToggleLeft as ToggleLeftIcon,
+  ToggleRight as ToggleRightIcon,
+  Database as DatabaseIcon,
+  Upload as UploadIcon,
 } from "lucide-react";

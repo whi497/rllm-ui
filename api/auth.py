@@ -24,6 +24,43 @@ JWT_EXPIRY_HOURS = 72
 COOKIE_NAME = "rllm_session"
 API_KEY_HEADER = "X-API-Key"
 
+# ── Team / org ───────────────────────────────────────────────────
+
+#: Map email domains to team display names.
+#: Add entries here for pilot companies.
+TEAM_DOMAINS: dict[str, str] = {
+    "doordash.com": "DoorDash",
+}
+
+# Allow extending via env: TEAM_DOMAINS_EXTRA="stripe.com=Stripe,openai.com=OpenAI"
+_extra = os.environ.get("TEAM_DOMAINS_EXTRA", "")
+for pair in _extra.split(","):
+    pair = pair.strip()
+    if "=" in pair:
+        domain, name = pair.split("=", 1)
+        TEAM_DOMAINS[domain.strip().lower()] = name.strip()
+
+
+def detect_team(email: str) -> str | None:
+    """Return team name from email domain, or None if not a known domain."""
+    domain = email.rsplit("@", 1)[-1].lower()
+    return TEAM_DOMAINS.get(domain)
+
+
+# ── Superuser ────────────────────────────────────────────────────
+
+#: Comma-separated list of emails that are always superusers.
+SUPERUSER_EMAILS: set[str] = {
+    e.strip().lower()
+    for e in os.environ.get("SUPERUSER_EMAILS", "").split(",")
+    if e.strip()
+}
+
+
+def is_superuser_email(email: str) -> bool:
+    return email.lower() in SUPERUSER_EMAILS
+
+
 # ── Password hashing ─────────────────────────────────────────────
 
 
@@ -37,13 +74,15 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 # ── JWT ───────────────────────────────────────────────────────────
 
-def create_jwt(user_id: str, email: str) -> str:
+def create_jwt(user_id: str, email: str, *, impersonator_id: str | None = None) -> str:
     payload = {
         "sub": user_id,
         "email": email,
         "exp": datetime.now(UTC) + timedelta(hours=JWT_EXPIRY_HOURS),
         "iat": datetime.now(UTC),
     }
+    if impersonator_id:
+        payload["impersonator"] = impersonator_id
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
@@ -68,6 +107,7 @@ async def get_current_user(request: Request) -> dict | None:
     - If IS_CLOUD is False -> returns None (no auth enforced)
     - If IS_CLOUD is True -> checks X-API-Key header, then JWT cookie
     - Raises 401 if no valid auth found in cloud mode
+    - Attaches ``impersonator_id`` to the user dict when impersonating
     """
     if not IS_CLOUD:
         return None
@@ -89,6 +129,9 @@ async def get_current_user(request: Request) -> dict | None:
         if payload:
             user = store.get_user_by_id(payload["sub"])
             if user:
+                # Attach impersonator info if present
+                if payload.get("impersonator"):
+                    user["impersonator_id"] = payload["impersonator"]
                 return user
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 

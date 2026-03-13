@@ -95,6 +95,20 @@ class PostgresStore(DataStore):
                     END $$;
                 """)
 
+                # Migration: add team and is_superuser columns
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS team TEXT;
+                    EXCEPTION WHEN others THEN NULL;
+                    END $$;
+                """)
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN DEFAULT FALSE;
+                    EXCEPTION WHEN others THEN NULL;
+                    END $$;
+                """)
+
                 # Projects table (with optional owner_id for multi-tenancy)
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS projects (
@@ -308,12 +322,128 @@ class PostgresStore(DataStore):
                     ON eval_results(session_id)
                 """)
 
+                # Skills table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS skills (
+                        id TEXT PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        category TEXT DEFAULT 'general',
+                        confidence REAL DEFAULT 0.0,
+                        reward_delta REAL DEFAULT 0.0,
+                        success_rate TEXT DEFAULT '',
+                        evidence_count INTEGER DEFAULT 0,
+                        source_session_ids JSONB DEFAULT '[]',
+                        tags JSONB DEFAULT '[]',
+                        is_active BOOLEAN DEFAULT FALSE,
+                        metadata JSONB,
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Migration: add reward_delta column to existing skills tables
+                cursor.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE skills ADD COLUMN IF NOT EXISTS reward_delta REAL DEFAULT 0.0;
+                    EXCEPTION WHEN others THEN NULL;
+                    END $$;
+                """)
+
+                # Span uploads metadata table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS span_uploads (
+                        upload_id TEXT PRIMARY KEY,
+                        filename TEXT NOT NULL,
+                        row_count INTEGER DEFAULT 0,
+                        session_count INTEGER DEFAULT 0,
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Imported agent sessions (from span CSV uploads)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS imported_agent_sessions (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL DEFAULT '',
+                        status TEXT DEFAULT 'completed',
+                        metadata JSONB DEFAULT '{}',
+                        upload_id TEXT REFERENCES span_uploads(upload_id) ON DELETE CASCADE,
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                        completed_at TIMESTAMPTZ
+                    )
+                """)
+
+                # Imported agent spans (from span CSV uploads)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS imported_agent_spans (
+                        id TEXT PRIMARY KEY,
+                        agent_session_id TEXT NOT NULL REFERENCES imported_agent_sessions(id) ON DELETE CASCADE,
+                        span_type TEXT NOT NULL,
+                        span_id TEXT DEFAULT '',
+                        invocation_id TEXT DEFAULT '',
+                        agent_name TEXT DEFAULT '',
+                        started_at DOUBLE PRECISION,
+                        ended_at DOUBLE PRECISION,
+                        duration_ms DOUBLE PRECISION,
+                        model TEXT DEFAULT '',
+                        input_tokens BIGINT,
+                        output_tokens BIGINT,
+                        total_tokens BIGINT,
+                        tool_name TEXT DEFAULT '',
+                        tool_type TEXT DEFAULT '',
+                        error TEXT DEFAULT '',
+                        data JSONB DEFAULT '{}',
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_imported_spans_session
+                    ON imported_agent_spans(agent_session_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_imported_spans_type
+                    ON imported_agent_spans(agent_session_id, span_type)
+                """)
+
+                # Eval uploads metadata table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS eval_uploads (
+                        upload_id TEXT PRIMARY KEY,
+                        filename TEXT NOT NULL,
+                        row_count INTEGER DEFAULT 0,
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Eval upload rows table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS eval_upload_rows (
+                        id SERIAL PRIMARY KEY,
+                        upload_id TEXT NOT NULL REFERENCES eval_uploads(upload_id) ON DELETE CASCADE,
+                        session_id TEXT,
+                        agent_trajectory TEXT,
+                        ground_truth TEXT,
+                        tags TEXT,
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_eval_upload_rows_upload_id
+                    ON eval_upload_rows(upload_id)
+                """)
+
                 conn.commit()
 
     def reset(self):
         """Reset the data store by dropping and recreating all tables."""
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
+                cursor.execute("DROP TABLE IF EXISTS imported_agent_spans CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS imported_agent_sessions CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS span_uploads CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS eval_upload_rows CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS eval_uploads CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS eval_results CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS user_settings CASCADE")
                 cursor.execute("DROP TABLE IF EXISTS chat_messages CASCADE")
@@ -414,6 +544,35 @@ class PostgresStore(DataStore):
                 deleted = cursor.rowcount > 0
                 conn.commit()
                 return deleted
+
+    def get_all_users(self) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT id, email, name, team, is_superuser, oauth_provider, created_at "
+                    "FROM users ORDER BY created_at DESC"
+                )
+                return [dict(row) for row in cursor.fetchall()]
+
+    def update_user_team(self, user_id: str, team: str | None) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET team = %s WHERE id = %s RETURNING *",
+                    (team, user_id),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+                return dict(row) if row else None
+
+    def set_superuser(self, user_id: str, is_superuser: bool) -> None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET is_superuser = %s WHERE id = %s",
+                    (is_superuser, user_id),
+                )
+                conn.commit()
 
     # ── User settings methods ─────────────────────────────────────
 
@@ -1111,3 +1270,134 @@ class PostgresStore(DataStore):
                     (project_id,),
                 )
                 return [dict(row) for row in cursor.fetchall()]
+
+    # ── Skill methods ──────────────────────────────────────────────
+
+    def create_skill(self, data: dict[str, Any]) -> dict[str, Any]:
+        skill_id = str(uuid.uuid4())
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO skills (id, title, description, category, confidence, reward_delta,
+                       success_rate, evidence_count, source_session_ids, tags, is_active, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+                    (skill_id, data["title"], data["description"],
+                     data.get("category", "general"), data.get("confidence", 0.0),
+                     data.get("reward_delta", 0.0), data.get("success_rate", ""),
+                     data.get("evidence_count", 0),
+                     json.dumps(data.get("source_session_ids", [])),
+                     json.dumps(data.get("tags", [])),
+                     data.get("is_active", False),
+                     json.dumps(data.get("metadata"))),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+                return dict(row)
+
+    def get_skills(self, is_active: bool | None = None, category: str | None = None) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                query = "SELECT * FROM skills WHERE TRUE"
+                params: list[Any] = []
+                if is_active is not None:
+                    query += " AND is_active = %s"
+                    params.append(is_active)
+                if category:
+                    query += " AND category = %s"
+                    params.append(category)
+                query += " ORDER BY created_at DESC"
+                cursor.execute(query, params)
+                return [dict(row) for row in cursor.fetchall()]
+
+    def get_skill(self, skill_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM skills WHERE id = %s", (skill_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+
+    def update_skill(self, skill_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM skills WHERE id = %s", (skill_id,))
+                if not cursor.fetchone():
+                    return None
+                sets = ["updated_at = CURRENT_TIMESTAMP"]
+                params: list[Any] = []
+                for key in ("title", "description", "category"):
+                    if key in data:
+                        sets.append(f"{key} = %s")
+                        params.append(data[key])
+                if "is_active" in data:
+                    sets.append("is_active = %s")
+                    params.append(data["is_active"])
+                if "tags" in data:
+                    sets.append("tags = %s")
+                    params.append(json.dumps(data["tags"]))
+                params.append(skill_id)
+                cursor.execute(f"UPDATE skills SET {', '.join(sets)} WHERE id = %s", params)
+                conn.commit()
+                cursor.execute("SELECT * FROM skills WHERE id = %s", (skill_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+
+    def delete_skill(self, skill_id: str) -> bool:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM skills WHERE id = %s RETURNING id", (skill_id,))
+                deleted = cursor.fetchone() is not None
+                conn.commit()
+                return deleted
+
+    def delete_all_skills(self) -> int:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM skills")
+                count = cursor.rowcount
+                conn.commit()
+                return count
+
+    # ── Eval upload methods ──────────────────────────────────────────
+
+    def create_eval_upload(self, upload_id: str, filename: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO eval_uploads (upload_id, filename, row_count) VALUES (%s, %s, %s) RETURNING *",
+                    (upload_id, filename, len(rows)),
+                )
+                upload = dict(cursor.fetchone())
+                for row in rows:
+                    cursor.execute(
+                        """INSERT INTO eval_upload_rows (upload_id, session_id, agent_trajectory, ground_truth, tags)
+                        VALUES (%s, %s, %s, %s, %s)""",
+                        (upload_id, row["session_id"], row["agent_trajectory"], row["ground_truth"], row["tags"]),
+                    )
+                conn.commit()
+                return upload
+
+    def get_eval_uploads(self) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM eval_uploads ORDER BY created_at DESC")
+                return [dict(row) for row in cursor.fetchall()]
+
+    def get_eval_upload_rows(self, upload_id: str) -> list[dict[str, Any]] | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT upload_id FROM eval_uploads WHERE upload_id = %s", (upload_id,))
+                if not cursor.fetchone():
+                    return None
+                cursor.execute(
+                    "SELECT * FROM eval_upload_rows WHERE upload_id = %s ORDER BY id",
+                    (upload_id,),
+                )
+                return [dict(row) for row in cursor.fetchall()]
+
+    def delete_eval_upload(self, upload_id: str) -> bool:
+        with self._get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM eval_uploads WHERE upload_id = %s RETURNING upload_id", (upload_id,))
+                deleted = cursor.fetchone() is not None
+                conn.commit()
+                return deleted

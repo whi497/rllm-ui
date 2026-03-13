@@ -10,13 +10,28 @@ from auth import (
     DEPLOYMENT_MODE,
     CurrentUser,
     create_jwt,
+    detect_team,
     generate_api_key,
     hash_password,
+    is_superuser_email,
     verify_password,
 )
 from models import AuthConfigResponse, LoginRequest, RegisterRequest, UserResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _user_response(user: dict, *, impersonating: bool = False) -> UserResponse:
+    """Build a UserResponse from a user dict, including team/superuser fields."""
+    return UserResponse(
+        id=user["id"],
+        email=user["email"],
+        name=user.get("name"),
+        api_key=user.get("api_key"),
+        team=user.get("team"),
+        is_superuser=bool(user.get("is_superuser")),
+        impersonating=impersonating,
+    )
 
 
 @router.get("/config", response_model=AuthConfigResponse)
@@ -64,6 +79,12 @@ def register(request: Request, response: Response, body: RegisterRequest):
         api_key=api_key,
     )
 
+    # Auto-assign team from email domain
+    team = detect_team(body.email)
+    if team:
+        store.update_user_team(user["id"], team)
+        user["team"] = team
+
     # Set session cookie
     token = create_jwt(user["id"], user["email"])
     response.set_cookie(
@@ -75,7 +96,7 @@ def register(request: Request, response: Response, body: RegisterRequest):
         max_age=72 * 3600,
     )
 
-    return UserResponse(id=user["id"], email=user["email"], name=user.get("name"), api_key=user["api_key"])
+    return _user_response(user)
 
 
 @router.post("/login", response_model=UserResponse)
@@ -104,6 +125,13 @@ def login(request: Request, response: Response, body: LoginRequest):
     if not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    # Backfill team if missing
+    if not user.get("team"):
+        team = detect_team(user["email"])
+        if team:
+            store.update_user_team(user["id"], team)
+            user["team"] = team
+
     token = create_jwt(user["id"], user["email"])
     response.set_cookie(
         key=COOKIE_NAME,
@@ -114,7 +142,7 @@ def login(request: Request, response: Response, body: LoginRequest):
         max_age=72 * 3600,
     )
 
-    return UserResponse(id=user["id"], email=user["email"], name=user.get("name"), api_key=user["api_key"])
+    return _user_response(user)
 
 
 @router.post("/logout")
@@ -170,4 +198,5 @@ def get_current_user_info(user: CurrentUser):
     if user is None:
         return UserResponse(id="local", email="local@localhost", name="Local User", api_key=None)
 
-    return UserResponse(id=user["id"], email=user["email"], name=user.get("name"), api_key=user.get("api_key"))
+    impersonating = "impersonator_id" in user
+    return _user_response(user, impersonating=impersonating)

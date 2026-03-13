@@ -1,0 +1,5 @@
+session_id,ground_truth,tags
+sess-001,"def fib(n): return n if n <= 1 else fib(n-1) + fib(n-2)",coding;fibonacci;recursion
+sess-002,"Tokyo population: 13.96 million",factual;geography
+sess-002,"Japan GDP: $4.23 trillion USD",factual;economics
+sess-003,"Add base case: if len(lst) <= 1: return lst",coding;bugfix;sorting

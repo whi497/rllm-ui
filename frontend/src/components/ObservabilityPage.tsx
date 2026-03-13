@@ -1,0 +1,334 @@
+"use client";
+
+import React, { useState, useMemo, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { ActivityIcon, SearchIcon, BarChartIcon, ListIcon, DatabaseIcon } from "./icons";
+import { Spinner, EmptyState } from "./ui";
+import { apiFetch } from "../config/api";
+import { usePolling } from "../hooks/usePolling";
+import { ObservabilityDashboard } from "./ObservabilityDashboard";
+
+interface AgentSession {
+  id: string;
+  name: string;
+  status: string;
+  metadata: Record<string, any> | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+interface PaginatedSessions {
+  items: AgentSession[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+type DataSource = "clickhouse" | "bigquery" | "postgres";
+
+const DATA_SOURCE_LABELS: Record<DataSource, string> = {
+  clickhouse: "ClickHouse",
+  bigquery: "BigQuery",
+  postgres: "Imported",
+};
+
+const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
+  const config: Record<string, { label: string; bg: string; text: string; dot: string; pulse: boolean }> = {
+    running: { label: "Running", bg: "bg-green-100", text: "text-green-700", dot: "bg-green-500", pulse: true },
+    completed: { label: "Completed", bg: "bg-gray-100", text: "text-gray-600", dot: "bg-gray-400", pulse: false },
+    failed: { label: "Failed", bg: "bg-red-100", text: "text-red-700", dot: "bg-red-500", pulse: false },
+  };
+  const c = config[status] ?? { label: status, bg: "bg-gray-100", text: "text-gray-600", dot: "bg-gray-400", pulse: false };
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${c.bg} ${c.text}`}>
+      <span className="relative flex w-1.5 h-1.5">
+        {c.pulse && <span className={`absolute inset-0 rounded-full ${c.dot} animate-ping opacity-75`} />}
+        <span className={`relative inline-flex rounded-full w-1.5 h-1.5 ${c.dot}`} />
+      </span>
+      {c.label}
+    </span>
+  );
+};
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return (
+    d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) +
+    " " +
+    d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  );
+}
+
+function formatDuration(start: string, end: string | null): string {
+  if (!end) return "-";
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  if (ms < 1000) return `${ms}ms`;
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  const remSec = sec % 60;
+  return `${min}m ${remSec}s`;
+}
+
+type ViewMode = "dashboard" | "sessions";
+
+const PAGE_SIZE = 20;
+
+export const ObservabilityPage: React.FC = () => {
+  const router = useRouter();
+  const [sessions, setSessions] = useState<AgentSession[]>([]);
+  const [totalSessions, setTotalSessions] = useState(0);
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("dashboard");
+  const [dataSource, setDataSource] = useState<DataSource>("clickhouse");
+  const initialLoadDone = useRef(false);
+
+  const fetchSessions = useCallback(async () => {
+    if (!initialLoadDone.current) setLoading(true);
+    try {
+      const offset = page * PAGE_SIZE;
+      const resp = await apiFetch(
+        `/api/agent-sessions?source=${dataSource}&limit=${PAGE_SIZE}&offset=${offset}`
+      );
+      if (!resp.ok) {
+        if (resp.status === 503) {
+          setSessions([]);
+          setTotalSessions(0);
+          return;
+        }
+        throw new Error("Failed to fetch agent sessions");
+      }
+      const data: PaginatedSessions = await resp.json();
+      setSessions(data.items);
+      setTotalSessions(data.total);
+    } catch {
+      if (!initialLoadDone.current) {
+        setSessions([]);
+        setTotalSessions(0);
+      }
+    } finally {
+      setLoading(false);
+      initialLoadDone.current = true;
+    }
+  }, [dataSource, page]);
+
+  const hasRunning = sessions.some((s) => s.status === "running");
+  usePolling(fetchSessions, { interval: hasRunning ? 5000 : 30000 });
+
+  // Reset page when switching data source
+  const handleSourceChange = (source: DataSource) => {
+    setDataSource(source);
+    setPage(0);
+    initialLoadDone.current = false;
+    setLoading(true);
+  };
+
+  const filtered = useMemo(() => {
+    if (!searchQuery) return sessions;
+    const q = searchQuery.toLowerCase();
+    return sessions.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        s.id.toLowerCase().includes(q) ||
+        s.status.toLowerCase().includes(q)
+    );
+  }, [sessions, searchQuery]);
+
+  const totalPages = Math.ceil(totalSessions / PAGE_SIZE);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Spinner />
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full p-8 overflow-auto">
+      <div className="w-full">
+        {/* Header with view toggle */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <h1 className="text-lg font-semibold text-black">Observability</h1>
+            {/* Data source toggle */}
+            <div className="flex items-center gap-1.5 bg-gray-100 rounded-lg p-0.5">
+              <DatabaseIcon size={13} className="text-gray-400 ml-2" />
+              {(["clickhouse", "bigquery", "postgres"] as const).map((src) => (
+                <button
+                  key={src}
+                  onClick={() => handleSourceChange(src)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                    dataSource === src
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {DATA_SOURCE_LABELS[src]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+            <button
+              onClick={() => setViewMode("dashboard")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                viewMode === "dashboard"
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              <BarChartIcon size={13} />
+              Dashboard
+            </button>
+            <button
+              onClick={() => setViewMode("sessions")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                viewMode === "sessions"
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              <ListIcon size={13} />
+              Sessions
+            </button>
+          </div>
+        </div>
+
+        {viewMode === "dashboard" ? (
+          <ObservabilityDashboard dataSource={dataSource} />
+        ) : (
+          <>
+            {/* Search */}
+            <div className="mb-6">
+              <div className="relative max-w-md">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <SearchIcon size={18} className="text-gray-400" />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search sessions..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400 transition-all duration-200"
+                />
+              </div>
+            </div>
+
+            {/* Summary */}
+            <div className="mb-4">
+              <p className="text-sm text-gray-600">
+                <span className="font-medium text-black">{totalSessions}</span> agent session
+                {totalSessions !== 1 ? "s" : ""}
+              </p>
+            </div>
+
+            {/* Content */}
+            {sessions.length === 0 ? (
+              <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
+                <EmptyState
+                  icon={<ActivityIcon size={32} className="text-gray-400" />}
+                  title="No agent sessions yet"
+                  description="Instrument an ADK agent with rllm_telemetry to see spans here."
+                  iconSize="lg"
+                />
+              </div>
+            ) : (
+              <>
+                <div className="bg-white border border-gray-200 overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Name</th>
+                        <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Status</th>
+                        <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Duration</th>
+                        <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Created</th>
+                        <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Session ID</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {filtered.map((session) => (
+                        <tr
+                          key={session.id}
+                          className="hover:bg-gray-50 cursor-pointer transition-colors"
+                          onClick={() =>
+                            router.push(`/observability/${session.id}?source=${dataSource}`)
+                          }
+                        >
+                          <td className="px-3 py-2.5 text-sm font-medium text-gray-900">{session.name}</td>
+                          <td className="px-3 py-2.5">
+                            <StatusBadge status={session.status} />
+                          </td>
+                          <td className="px-3 py-2.5 text-sm text-gray-500">
+                            {formatDuration(session.created_at, session.completed_at)}
+                          </td>
+                          <td className="px-3 py-2.5 text-sm text-gray-400">{formatDate(session.created_at)}</td>
+                          <td className="px-3 py-2.5 text-sm text-gray-400 font-mono">{session.id.slice(0, 8)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between mt-4">
+                    <p className="text-xs text-gray-500">
+                      Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalSessions)} of{" "}
+                      {totalSessions}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setPage(Math.max(0, page - 1))}
+                        disabled={page === 0}
+                        className="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                        // Show pages around current page
+                        let pageNum: number;
+                        if (totalPages <= 5) {
+                          pageNum = i;
+                        } else if (page < 3) {
+                          pageNum = i;
+                        } else if (page > totalPages - 4) {
+                          pageNum = totalPages - 5 + i;
+                        } else {
+                          pageNum = page - 2 + i;
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setPage(pageNum)}
+                            className={`w-8 h-8 text-xs font-medium rounded-md ${
+                              page === pageNum
+                                ? "bg-accent-100 text-accent-700 border border-accent-200"
+                                : "text-gray-600 hover:bg-gray-50 border border-gray-200"
+                            }`}
+                          >
+                            {pageNum + 1}
+                          </button>
+                        );
+                      })}
+                      <button
+                        onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+                        disabled={page >= totalPages - 1}
+                        className="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+};

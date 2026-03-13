@@ -13,6 +13,9 @@ interface User {
   email: string;
   name: string | null;
   api_key: string | null;
+  team: string | null;
+  is_superuser: boolean;
+  impersonating: boolean;
 }
 
 interface AuthState {
@@ -24,6 +27,9 @@ interface AuthState {
   login: (email: string, password: string) => Promise<string | null>;
   register: (email: string, password: string, name?: string) => Promise<string | null>;
   logout: () => Promise<void>;
+  impersonate: (userId: string) => Promise<string | null>;
+  stopImpersonating: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState>({
@@ -35,6 +41,9 @@ const AuthContext = createContext<AuthState>({
   login: async () => null,
   register: async () => null,
   logout: async () => {},
+  impersonate: async () => null,
+  stopImpersonating: async () => {},
+  refreshUser: async () => {},
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -44,6 +53,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [justRegistered, setJustRegistered] = useState(false);
 
   const clearJustRegistered = useCallback(() => setJustRegistered(false), []);
+
+  const fetchMe = useCallback(async () => {
+    const meRes = await apiFetch("/api/auth/me");
+    if (meRes.ok) {
+      setUser(await meRes.json());
+    }
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -130,8 +146,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   }, []);
 
+  const impersonate = useCallback(async (userId: string): Promise<string | null> => {
+    try {
+      const res = await apiFetch(`/api/admin/impersonate/${userId}`, { method: "POST" });
+      if (res.ok) {
+        await fetchMe();
+        return null;
+      }
+      const err = await res.json().catch(() => ({}));
+      return err.detail || "Impersonation failed";
+    } catch {
+      return "Network error";
+    }
+  }, [fetchMe]);
+
+  const stopImpersonating = useCallback(async () => {
+    try {
+      await apiFetch("/api/admin/stop-impersonate", { method: "POST" });
+      await fetchMe();
+    } catch {
+      // ignore
+    }
+  }, [fetchMe]);
+
   return (
-    <AuthContext.Provider value={{ config, user, isLoading, justRegistered, clearJustRegistered, login, register, logout }}>
+    <AuthContext.Provider
+      value={{
+        config,
+        user,
+        isLoading,
+        justRegistered,
+        clearJustRegistered,
+        login,
+        register,
+        logout,
+        impersonate,
+        stopImpersonating,
+        refreshUser: fetchMe,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

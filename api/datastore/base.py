@@ -104,6 +104,21 @@ class DataStore(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_all_users(self) -> list[dict[str, Any]]:
+        """Return all users (admin only). Excludes password_hash."""
+        pass
+
+    @abstractmethod
+    def update_user_team(self, user_id: str, team: str | None) -> dict[str, Any] | None:
+        """Set a user's team. Returns updated user dict or None."""
+        pass
+
+    @abstractmethod
+    def set_superuser(self, user_id: str, is_superuser: bool) -> None:
+        """Set or clear the superuser flag on a user."""
+        pass
+
     # ── User settings methods (cloud mode only) ────────────────────
 
     @abstractmethod
@@ -363,6 +378,60 @@ class DataStore(ABC):
     @abstractmethod
     def get_eval_results_by_project(self, project_id: str) -> list[dict[str, Any]]:
         """Get all eval results for sessions in a project (for leaderboard grouping)."""
+        pass
+
+    # ── Skill methods ─────────────────────────────────────────────────
+
+    @abstractmethod
+    def create_skill(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Store a distilled skill. Returns the created record."""
+        pass
+
+    @abstractmethod
+    def get_skills(self, is_active: bool | None = None, category: str | None = None) -> list[dict[str, Any]]:
+        """Get skills, optionally filtered."""
+        pass
+
+    @abstractmethod
+    def get_skill(self, skill_id: str) -> dict[str, Any] | None:
+        """Get a single skill by ID."""
+        pass
+
+    @abstractmethod
+    def update_skill(self, skill_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+        """Partial update a skill. Returns updated record or None."""
+        pass
+
+    @abstractmethod
+    def delete_skill(self, skill_id: str) -> bool:
+        """Delete a skill. Returns True if existed."""
+        pass
+
+    @abstractmethod
+    def delete_all_skills(self) -> int:
+        """Delete all skills. Returns count of deleted rows."""
+        pass
+
+    # ── Eval upload methods ────────────────────────────────────────────
+
+    @abstractmethod
+    def create_eval_upload(self, upload_id: str, filename: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """Store an eval CSV upload (metadata + rows). Returns the upload metadata."""
+        pass
+
+    @abstractmethod
+    def get_eval_uploads(self) -> list[dict[str, Any]]:
+        """List all eval uploads (metadata only)."""
+        pass
+
+    @abstractmethod
+    def get_eval_upload_rows(self, upload_id: str) -> list[dict[str, Any]] | None:
+        """Get all rows for an upload. Returns None if upload doesn't exist."""
+        pass
+
+    @abstractmethod
+    def delete_eval_upload(self, upload_id: str) -> bool:
+        """Delete an upload and its rows. Returns True if existed."""
         pass
 
     def close(self):
