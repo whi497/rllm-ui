@@ -48,19 +48,6 @@ interface EvalResult {
   created_at: string;
 }
 
-interface Episode {
-  id: string;
-  session_id: string;
-  step: number;
-  task: Record<string, any>;
-  is_correct: boolean;
-  termination_reason: string | null;
-  trajectories: any[];
-  metrics?: Record<string, any>;
-  info?: Record<string, any>;
-  created_at: string;
-}
-
 const StatusBadge: React.FC<{ status: SessionStatus }> = ({ status }) => {
   const config = {
     running: { label: "Running", bg: "bg-green-100", text: "text-green-700", dot: "bg-green-500", pulse: true },
@@ -87,7 +74,6 @@ export const EvalRunDetail: React.FC = () => {
 
   const [session, setSession] = useState<Session | null>(null);
   const [evalResult, setEvalResult] = useState<EvalResult | null>(null);
-  const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>("evaluation");
   const [metaSearchQuery, setMetaSearchQuery] = useState("");
@@ -103,10 +89,9 @@ export const EvalRunDetail: React.FC = () => {
   const fetchData = useCallback(async () => {
     if (!sessionId) return;
     try {
-      const [sessResp, resultsResp, episodesResp] = await Promise.all([
+      const [sessResp, resultsResp] = await Promise.all([
         apiFetch(`/api/sessions/${sessionId}`),
         apiFetch(`/api/eval-results?session_id=${sessionId}`),
-        apiFetch(`/api/episodes?session_id=${sessionId}`),
       ]);
 
       if (sessResp.ok) setSession(await sessResp.json());
@@ -114,7 +99,6 @@ export const EvalRunDetail: React.FC = () => {
         const data = await resultsResp.json();
         if (data.length > 0) setEvalResult(data[0]);
       }
-      if (episodesResp.ok) setEpisodes(await episodesResp.json());
     } catch {
       // ignore
     } finally {
@@ -125,10 +109,6 @@ export const EvalRunDetail: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  const normalizedEpisodes = useMemo(() => {
-    return episodes.map((ep) => ({ ...ep, step: 0 }));
-  }, [episodes]);
 
   const scrollToMetaMatch = useCallback((direction: "next" | "prev" = "next") => {
     if (!metaContainerRef.current || !metaSearchQuery.trim()) return;
@@ -330,10 +310,8 @@ export const EvalRunDetail: React.FC = () => {
       <div className="flex-1 overflow-hidden">
         {activeTab === "evaluation" ? (
           <EpisodePanel
-            episodes={normalizedEpisodes}
             selectedStep={0}
             sessionId={sessionId}
-            loading={loading}
             hideStepLabel
           />
         ) : (

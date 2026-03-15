@@ -64,16 +64,20 @@ async def batch_create_episodes(request: Request, user: CurrentUser):
 
 
 @router.get("/episodes", response_model=list[EpisodeResponse])
-def get_episodes(request: Request, user: CurrentUser, session_id: str = Query(..., description="Filter episodes by session ID")):
-    """Query episodes by session ID."""
+def get_episodes(
+    request: Request,
+    user: CurrentUser,
+    session_id: str = Query(..., description="Filter episodes by session ID"),
+    step: int | None = Query(None, description="Optional step filter"),
+):
+    """Query episodes by session ID, optionally filtered by step."""
     store = request.app.state.store
 
-    # Check session
     session = store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    return store.get_episodes(session_id)
+    return store.get_episodes(session_id, step=step)
 
 
 @router.get("/episodes/search", response_model=EpisodeSearchResponse)

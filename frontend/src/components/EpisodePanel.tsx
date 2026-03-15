@@ -85,10 +85,8 @@ interface GroupMatchLocation {
 }
 
 interface EpisodePanelProps {
-  episodes: Episode[];
   selectedStep: number | null;
   sessionId?: string;
-  loading?: boolean;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   hideStepLabel?: boolean;
@@ -283,13 +281,14 @@ const groupTrajectoryGroupsByTask = (
 };
 
 export const EpisodePanel: React.FC<EpisodePanelProps> = ({
-  episodes,
   selectedStep,
   sessionId,
-  loading = false,
   viewMode: externalViewMode,
   hideStepLabel = false,
 }) => {
+  const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [episodesLoading, setEpisodesLoading] = useState(false);
+  const [episodesError, setEpisodesError] = useState<string | null>(null);
   const [expandedEpisodes, setExpandedEpisodes] = useState<Set<string>>(
     new Set(),
   );
@@ -356,16 +355,44 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
   const prevGroupDebouncedQuery = useRef("");
   const shouldGroupScrollRef = useRef(false);
 
-  const effectiveSessionId = sessionId || episodes[0]?.session_id;
+  const effectiveSessionId = sessionId;
+
+  // Fetch episodes per-step (mirrors trajectory groups pattern)
+  useEffect(() => {
+    if (!effectiveSessionId || selectedStep === null) {
+      setEpisodes([]);
+      return;
+    }
+
+    const fetchEpisodes = async () => {
+      setEpisodesLoading(true);
+      setEpisodesError(null);
+      try {
+        const params = new URLSearchParams({
+          session_id: effectiveSessionId,
+          step: String(selectedStep),
+        });
+        const response = await apiFetch(`/api/episodes?${params}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        setEpisodes(data);
+      } catch (err) {
+        setEpisodesError(err instanceof Error ? err.message : "Failed to fetch episodes");
+        setEpisodes([]);
+      } finally {
+        setEpisodesLoading(false);
+      }
+    };
+
+    fetchEpisodes();
+  }, [effectiveSessionId, selectedStep]);
 
   const filteredEpisodes = useMemo(() => {
     if (committedQuery.trim()) {
       return searchResults;
     }
-    return selectedStep !== null
-      ? episodes.filter((ep) => ep.step === selectedStep)
-      : [];
-  }, [episodes, selectedStep, committedQuery, searchResults]);
+    return episodes; // already filtered by step from the API
+  }, [episodes, committedQuery, searchResults]);
 
   useEffect(() => {
     if (!committedQuery.trim()) {
@@ -1012,10 +1039,21 @@ export const EpisodePanel: React.FC<EpisodePanelProps> = ({
             </div>
           )
         ) : // Episodes View
-        loading ? (
+        episodesLoading ? (
           <div className="flex items-center justify-center py-12">
             <Spinner size="sm" variant="blue" />
           </div>
+        ) : episodesError ? (
+          <EmptyState
+            icon={
+              <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            }
+            title="Failed to load episodes"
+            iconBg="bg-red-50"
+            className="py-12 px-4"
+          />
         ) : searchError ? (
           <EmptyState
             icon={
