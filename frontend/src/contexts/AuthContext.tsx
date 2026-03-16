@@ -89,8 +89,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
       } catch {
-        // If config endpoint doesn't exist, assume local mode
-        setConfig({ auth_required: false, oauth_providers: [] });
+        // Config fetch failed — default to requiring auth so we don't
+        // accidentally expose the app without login.
+        setConfig({ auth_required: true, oauth_providers: [] });
       } finally {
         setIsLoading(false);
       }
