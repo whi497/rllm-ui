@@ -63,22 +63,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const init = async () => {
+      let cfg: AuthConfig = { auth_required: true, oauth_providers: [] };
+      let userData: User | null = null;
+      let welcome = false;
+
       try {
         const configRes = await apiFetch("/api/auth/config");
         if (configRes.ok) {
-          const cfg: AuthConfig = await configRes.json();
-          setConfig(cfg);
+          cfg = await configRes.json();
 
           if (cfg.auth_required) {
             const meRes = await apiFetch("/api/auth/me");
             if (meRes.ok) {
-              setUser(await meRes.json());
+              userData = await meRes.json();
 
               // Check for OAuth welcome redirect (new user)
               const params = new URLSearchParams(window.location.search);
               if (params.get("welcome") === "1") {
-                setJustRegistered(true);
-                // Clean up the URL
+                welcome = true;
                 params.delete("welcome");
                 const cleanUrl = params.toString()
                   ? `${window.location.pathname}?${params.toString()}`
@@ -89,12 +91,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
       } catch {
-        // Config fetch failed — default to requiring auth so we don't
-        // accidentally expose the app without login.
-        setConfig({ auth_required: true, oauth_providers: [] });
-      } finally {
-        setIsLoading(false);
+        // Config fetch failed — default to requiring auth
       }
+
+      // Batch all state updates together to avoid intermediate renders
+      setConfig(cfg);
+      setUser(userData);
+      if (welcome) setJustRegistered(true);
+      setIsLoading(false);
     };
     init();
   }, []);
