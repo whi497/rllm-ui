@@ -10,7 +10,7 @@ Web interface for monitoring and analyzing [rLLM](https://github.com/rllm-org/rl
 
 There are two ways to access rLLM UI:
 
-1. **Cloud** — Use our hosted service at [ui.rllm-project.com](https://ui.rllm-project.com).
+1. **Cloud** — Use our hosted service at [ui.rllm-project.com](https://ui.rllm-project.com) (see [below](#cloud-setup)).
 2. **Self-hosted** — Run locally from the repository (see [below](#self-hosted-setup)).
 
 ---
@@ -21,10 +21,10 @@ There are two ways to access rLLM UI:
 2. Sign up at [ui.rllm-project.com](https://ui.rllm-project.com)
 3. Copy your API key (shown once at registration) and paste it in terminal (or save it as RLLM_API_KEY in `.env`)
 
-That's it. Run your training script with 'ui' included, and you will see your training runs real-time.
+That's it. No need to setup the database and other configurations.
 
 > [!NOTE]
-> The observability AI agent can be enabled from the **Settings** page in the UI — no extra configuration needed.
+> The observability AI agent can be enabled by adding your ANTHROPIC_API_KEY in the **Settings** page in the UI — no extra configuration needed.
 ---
 
 ### Self-hosted Setup
