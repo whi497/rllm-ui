@@ -62,4 +62,5 @@ export {
   ToggleRight as ToggleRightIcon,
   Database as DatabaseIcon,
   Upload as UploadIcon,
+  Layers as LayersIcon,
 } from "lucide-react";

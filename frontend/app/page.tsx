@@ -1,7 +1,5 @@
-"use client";
-
-import { ProjectList } from "../src/components/ProjectList";
+import { redirect } from "next/navigation";
 
 export default function HomePage() {
-  return <ProjectList />;
+  redirect("/observability");
 }

@@ -10,7 +10,7 @@ from models import EvalExplorerRow, EvalExplorerSessionInfo, EvalUploadResponse,
 
 router = APIRouter(prefix="/api/eval-uploads", tags=["eval-uploads"])
 
-REQUIRED_COLUMNS = {"session_id", "ground_truth"}
+REQUIRED_COLUMNS = {"session_id", "ground_truth", "rating"}
 
 
 @router.post("", response_model=EvalUploadResponse)
@@ -61,12 +61,13 @@ async def upload_eval_csv(request: Request, user: CurrentUser, file: UploadFile 
         )
 
     found: set[str] = set()
+    uid = user["id"]
     if clickhouse:
-        found |= clickhouse.check_session_ids_exist(list(session_ids))
+        found |= clickhouse.check_session_ids_exist(list(session_ids), user_id=uid)
     if bigquery:
-        found |= bigquery.check_session_ids_exist(list(session_ids))
+        found |= bigquery.check_session_ids_exist(list(session_ids), user_id=uid)
     if pg_spans:
-        found |= pg_spans.check_session_ids_exist(list(session_ids))
+        found |= pg_spans.check_session_ids_exist(list(session_ids), user_id=uid)
 
     not_found = session_ids - found
     if not_found:
@@ -92,10 +93,17 @@ async def upload_eval_csv(request: Request, user: CurrentUser, file: UploadFile 
                 "session_id": row.get("session_id", ""),
                 "agent_trajectory": "",
                 "ground_truth": row.get("ground_truth", ""),
+                "rating": row.get("rating", ""),
+                "trajectory_alignment": row.get("trajectory_alignment", ""),
+                "task_success": row.get("task_success", ""),
                 "tags": row.get("tags", ""),
+                "reference_trajectory": row.get("reference_trajectory", ""),
+                "reference_state": row.get("reference_state", ""),
+                "reference_answer": row.get("reference_answer", ""),
             }
             for row in rows
         ],
+        user_id=user["id"],
     )
     return result
 
@@ -104,7 +112,7 @@ async def upload_eval_csv(request: Request, user: CurrentUser, file: UploadFile 
 def list_eval_uploads(request: Request, user: CurrentUser):
     """List all past eval uploads."""
     store = request.app.state.store
-    return store.get_eval_uploads()
+    return store.get_eval_uploads(user_id=user["id"])
 
 
 @router.get("/explorer", response_model=list[EvalExplorerRow])
@@ -119,15 +127,15 @@ def get_eval_explorer(
 
     # Fetch eval rows (all or filtered by upload)
     if upload_id:
-        rows = store.get_eval_upload_rows(upload_id)
+        rows = store.get_eval_upload_rows(upload_id, user_id=user["id"])
         if rows is None:
             raise HTTPException(status_code=404, detail="Upload not found")
     else:
         # Get all rows across all uploads
-        all_uploads = store.get_eval_uploads()
+        all_uploads = store.get_eval_uploads(user_id=user["id"])
         rows = []
         for u in all_uploads:
-            upload_rows = store.get_eval_upload_rows(u["upload_id"])
+            upload_rows = store.get_eval_upload_rows(u["upload_id"], user_id=user["id"])
             if upload_rows:
                 rows.extend(upload_rows)
 
@@ -161,7 +169,13 @@ def get_eval_explorer(
             upload_id=r["upload_id"],
             session_id=sid,
             ground_truth=r.get("ground_truth", ""),
+            rating=r.get("rating", ""),
+            trajectory_alignment=r.get("trajectory_alignment", ""),
+            task_success=str(r["task_success"]).lower() if r.get("task_success") is not None else "",
             tags=r.get("tags", ""),
+            reference_trajectory=r.get("reference_trajectory", ""),
+            reference_state=r.get("reference_state", ""),
+            reference_answer=r.get("reference_answer", ""),
             created_at=r["created_at"],
             session=sess_info,
         ))
@@ -172,9 +186,14 @@ def get_eval_explorer(
 def get_eval_upload_rows(request: Request, upload_id: str, user: CurrentUser):
     """Get all rows for a specific upload."""
     store = request.app.state.store
-    rows = store.get_eval_upload_rows(upload_id)
+    rows = store.get_eval_upload_rows(upload_id, user_id=user["id"])
     if rows is None:
         raise HTTPException(status_code=404, detail="Upload not found")
+    for r in rows:
+        if r.get("task_success") is not None:
+            r["task_success"] = str(r["task_success"]).lower()
+        else:
+            r["task_success"] = ""
     return rows
 
 
@@ -182,7 +201,7 @@ def get_eval_upload_rows(request: Request, upload_id: str, user: CurrentUser):
 def delete_eval_upload(request: Request, upload_id: str, user: CurrentUser):
     """Delete an upload and all its rows."""
     store = request.app.state.store
-    deleted = store.delete_eval_upload(upload_id)
+    deleted = store.delete_eval_upload(upload_id, user_id=user["id"])
     if not deleted:
         raise HTTPException(status_code=404, detail="Upload not found")
     return {"ok": True}

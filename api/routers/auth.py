@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from auth import (
     COOKIE_NAME,
-    IS_CLOUD,
     DEPLOYMENT_MODE,
+    SECURE_COOKIES,
     CurrentUser,
     create_jwt,
     detect_team,
@@ -46,18 +46,12 @@ def get_auth_config():
         providers.append("github")
     if os.environ.get("GOOGLE_CLIENT_ID"):
         providers.append("google")
-    return AuthConfigResponse(auth_required=IS_CLOUD, deployment_mode=DEPLOYMENT_MODE, oauth_providers=providers)
+    return AuthConfigResponse(auth_required=True, deployment_mode=DEPLOYMENT_MODE, oauth_providers=providers)
 
 
 @router.post("/register", response_model=UserResponse)
 def register(request: Request, response: Response, body: RegisterRequest):
-    """Create a new user account.
-
-    Only available in cloud mode. Sets an httpOnly session cookie.
-    """
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404, detail="Registration not available in local mode")
-
+    """Create a new user account. Sets an httpOnly session cookie."""
     store = request.app.state.store
 
     # Check if email already exists
@@ -91,7 +85,7 @@ def register(request: Request, response: Response, body: RegisterRequest):
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=True,
+        secure=SECURE_COOKIES,
         samesite="lax",
         max_age=72 * 3600,
     )
@@ -105,9 +99,6 @@ def login(request: Request, response: Response, body: LoginRequest):
 
     Sets an httpOnly session cookie on success.
     """
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404, detail="Login not available in local mode")
-
     store = request.app.state.store
 
     user = store.get_user_by_email(body.email)
@@ -137,7 +128,7 @@ def login(request: Request, response: Response, body: LoginRequest):
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=True,
+        secure=SECURE_COOKIES,
         samesite="lax",
         max_age=72 * 3600,
     )
@@ -154,16 +145,7 @@ def logout(response: Response, user: CurrentUser):
 
 @router.post("/delete-account")
 def delete_account(request: Request, response: Response, user: CurrentUser):
-    """Delete the current user's account and all associated data.
-
-    Only available in cloud mode. Clears the session cookie.
-    """
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404, detail="Not available in local mode")
-
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
+    """Delete the current user's account and all associated data. Clears the session cookie."""
     store = request.app.state.store
     store.delete_user(user["id"])
 
@@ -177,9 +159,6 @@ def regenerate_api_key(request: Request, user: CurrentUser):
 
     The new key is returned once and cannot be retrieved again.
     """
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
     store = request.app.state.store
     new_key = generate_api_key()
     updated = store.update_user_api_key(user["id"], new_key)
@@ -191,12 +170,6 @@ def regenerate_api_key(request: Request, user: CurrentUser):
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user_info(user: CurrentUser):
-    """Return the currently authenticated user's info + API key.
-
-    In local mode (user is None), returns a placeholder.
-    """
-    if user is None:
-        return UserResponse(id="local", email="local@localhost", name="Local User", api_key=None)
-
+    """Return the currently authenticated user's info + API key."""
     impersonating = "impersonator_id" in user
     return _user_response(user, impersonating=impersonating)

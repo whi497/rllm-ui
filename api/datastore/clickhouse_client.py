@@ -27,6 +27,7 @@ AGENT_SESSIONS_COLUMNS: OrderedDict[str, str] = OrderedDict(
     [
         ("id", "String"),
         ("name", "String"),
+        ("user_id", "String DEFAULT ''"),
         ("status", "String DEFAULT 'running'"),
         ("metadata", "String DEFAULT '{}'"),
         ("created_at", "DateTime64(3) DEFAULT now64(3)"),
@@ -174,6 +175,13 @@ class ClickHouseClient:
                     partition_by="toYYYYMM(created_at)",
                 )
             )
+            # Migration: add user_id column to existing agent_sessions tables
+            try:
+                self.client.command(
+                    "ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS user_id String DEFAULT ''"
+                )
+            except Exception:
+                pass  # Column already exists or table was just created with it
             logger.info("ClickHouse tables initialized")
 
     # ------------------------------------------------------------------
@@ -185,38 +193,59 @@ class ClickHouseClient:
         session_id: str,
         name: str,
         metadata: dict[str, Any] | None = None,
+        user_id: str = "",
     ) -> None:
         with self._lock:
             self.client.insert(
                 "agent_sessions",
-                [[session_id, name, "running", _safe_json(metadata), datetime.now(timezone.utc), None]],
-                column_names=["id", "name", "status", "metadata", "created_at", "completed_at"],
+                [[session_id, name, user_id, "running", _safe_json(metadata), datetime.now(timezone.utc), None]],
+                column_names=["id", "name", "user_id", "status", "metadata", "created_at", "completed_at"],
             )
 
-    def get_agent_session(self, session_id: str) -> dict[str, Any] | None:
+    def get_agent_session(self, session_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         with self._lock:
-            result = self.client.query(
-                "SELECT * FROM agent_sessions WHERE id = {sid:String}",
-                parameters={"sid": session_id},
-            )
+            if user_id:
+                result = self.client.query(
+                    "SELECT * FROM agent_sessions WHERE id = {sid:String} AND user_id = {uid:String}",
+                    parameters={"sid": session_id, "uid": user_id},
+                )
+            else:
+                result = self.client.query(
+                    "SELECT * FROM agent_sessions WHERE id = {sid:String}",
+                    parameters={"sid": session_id},
+                )
         if not result.result_rows:
             return None
         return self._row_to_session_dict(result.column_names, result.result_rows[0])
 
-    def count_agent_sessions(self) -> int:
+    def count_agent_sessions(self, user_id: str | None = None) -> int:
         with self._lock:
-            result = self.client.query("SELECT count() AS cnt FROM agent_sessions")
+            if user_id:
+                result = self.client.query(
+                    "SELECT count() AS cnt FROM agent_sessions WHERE user_id = {uid:String}",
+                    parameters={"uid": user_id},
+                )
+            else:
+                result = self.client.query("SELECT count() AS cnt FROM agent_sessions")
         if not result.result_rows:
             return 0
         return result.result_rows[0][0]
 
-    def get_agent_sessions(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    def get_agent_sessions(self, limit: int = 50, offset: int = 0, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
-            result = self.client.query(
-                "SELECT * FROM agent_sessions ORDER BY created_at DESC "
-                "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
-                parameters={"limit": limit, "offset": offset},
-            )
+            if user_id:
+                result = self.client.query(
+                    "SELECT * FROM agent_sessions WHERE user_id = {uid:String} "
+                    "ORDER BY created_at DESC "
+                    "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
+                    parameters={"uid": user_id, "limit": limit, "offset": offset},
+                )
+            else:
+                result = self.client.query(
+                    "SELECT * FROM agent_sessions ORDER BY created_at DESC "
+                    "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
+                    parameters={"limit": limit, "offset": offset},
+                )
         return [
             self._row_to_session_dict(result.column_names, row)
             for row in result.result_rows
@@ -538,8 +567,18 @@ class ClickHouseClient:
     # Aggregate dashboard queries
     # ------------------------------------------------------------------
 
-    def get_dashboard_stats(self, days: int = 7) -> dict[str, Any]:
+    def _user_session_filter(self, user_id: str | None) -> tuple[str, dict]:
+        """Return a SQL clause and params to filter spans by user's sessions."""
+        if user_id:
+            return (
+                "AND agent_session_id IN (SELECT id FROM agent_sessions WHERE user_id = {uid:String}) ",
+                {"uid": user_id},
+            )
+        return ("", {})
+
+    def get_dashboard_stats(self, days: int = 7, user_id: str | None = None) -> dict[str, Any]:
         """Get aggregate statistics across all spans within the time window."""
+        user_clause, user_params = self._user_session_filter(user_id)
         with self._lock:
             result = self.client.query(
                 "SELECT "
@@ -554,8 +593,9 @@ class ClickHouseClient:
                 "  avgIf(duration_ms, span_type = 'tool.end' AND duration_ms > 0) AS avg_tool_latency_ms, "
                 "  countIf(error != '') AS error_count "
                 "FROM agent_spans "
-                "WHERE created_at >= now() - INTERVAL {days:UInt32} DAY",
-                parameters={"days": days},
+                "WHERE created_at >= now() - INTERVAL {days:UInt32} DAY "
+                + user_clause,
+                parameters={"days": days, **user_params},
             )
         if not result.result_rows:
             return {}
@@ -566,8 +606,9 @@ class ClickHouseClient:
                 row[k] = 0
         return row
 
-    def get_span_timeseries(self, days: int = 7) -> list[dict[str, Any]]:
+    def get_span_timeseries(self, days: int = 7, user_id: str | None = None) -> list[dict[str, Any]]:
         """Get time-bucketed span counts for charting."""
+        user_clause, user_params = self._user_session_filter(user_id)
         with self._lock:
             result = self.client.query(
                 "SELECT "
@@ -580,9 +621,10 @@ class ClickHouseClient:
                 "  countIf(error != '') AS errors "
                 "FROM agent_spans "
                 "WHERE created_at >= now() - INTERVAL {days:UInt32} DAY "
+                + user_clause +
                 "GROUP BY bucket "
                 "ORDER BY bucket",
-                parameters={"days": days},
+                parameters={"days": days, **user_params},
             )
         rows = [dict(zip(result.column_names, row)) for row in result.result_rows]
         for row in rows:
@@ -591,8 +633,9 @@ class ClickHouseClient:
                     row[k] = 0
         return rows
 
-    def get_top_models(self, days: int = 7, limit: int = 10) -> list[dict[str, Any]]:
+    def get_top_models(self, days: int = 7, limit: int = 10, user_id: str | None = None) -> list[dict[str, Any]]:
         """Get most used models with token counts."""
+        user_clause, user_params = self._user_session_filter(user_id)
         with self._lock:
             result = self.client.query(
                 "SELECT "
@@ -605,10 +648,11 @@ class ClickHouseClient:
                 "FROM agent_spans "
                 "WHERE span_type = 'llm.end' AND model != '' "
                 "  AND created_at >= now() - INTERVAL {days:UInt32} DAY "
+                + user_clause +
                 "GROUP BY model "
                 "ORDER BY call_count DESC "
                 "LIMIT {limit:UInt32}",
-                parameters={"days": days, "limit": limit},
+                parameters={"days": days, "limit": limit, **user_params},
             )
         rows = [dict(zip(result.column_names, row)) for row in result.result_rows]
         for row in rows:
@@ -617,8 +661,9 @@ class ClickHouseClient:
                     row[k] = 0
         return rows
 
-    def get_top_tools(self, days: int = 7, limit: int = 10) -> list[dict[str, Any]]:
+    def get_top_tools(self, days: int = 7, limit: int = 10, user_id: str | None = None) -> list[dict[str, Any]]:
         """Get most used tools with counts and latency."""
+        user_clause, user_params = self._user_session_filter(user_id)
         with self._lock:
             result = self.client.query(
                 "SELECT "
@@ -629,10 +674,11 @@ class ClickHouseClient:
                 "FROM agent_spans "
                 "WHERE span_type = 'tool.end' AND tool_name != '' "
                 "  AND created_at >= now() - INTERVAL {days:UInt32} DAY "
+                + user_clause +
                 "GROUP BY tool_name "
                 "ORDER BY call_count DESC "
                 "LIMIT {limit:UInt32}",
-                parameters={"days": days, "limit": limit},
+                parameters={"days": days, "limit": limit, **user_params},
             )
         rows = [dict(zip(result.column_names, row)) for row in result.result_rows]
         for row in rows:
@@ -641,8 +687,12 @@ class ClickHouseClient:
                     row[k] = 0
         return rows
 
-    def get_session_count(self, days: int = 7) -> dict[str, int]:
+    def get_session_count(self, days: int = 7, user_id: str | None = None) -> dict[str, int]:
         """Get session counts by status within the time window."""
+        user_filter = "AND user_id = {uid:String} " if user_id else ""
+        params: dict[str, Any] = {"days": days}
+        if user_id:
+            params["uid"] = user_id
         with self._lock:
             result = self.client.query(
                 "SELECT "
@@ -651,26 +701,46 @@ class ClickHouseClient:
                 "  countIf(status = 'completed') AS completed, "
                 "  countIf(status = 'failed') AS failed "
                 "FROM agent_sessions "
-                "WHERE created_at >= now() - INTERVAL {days:UInt32} DAY",
-                parameters={"days": days},
+                "WHERE created_at >= now() - INTERVAL {days:UInt32} DAY "
+                + user_filter,
+                parameters=params,
             )
         if not result.result_rows:
             return {"total": 0, "running": 0, "completed": 0, "failed": 0}
         return dict(zip(result.column_names, result.result_rows[0]))
 
+    def get_span_activity(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        """Daily span counts over the full stored time range."""
+        user_clause, user_params = self._user_session_filter(user_id)
+        # For span_activity, the WHERE clause starts fresh (no prior condition)
+        where = "WHERE 1=1 " + user_clause if user_clause else ""
+        with self._lock:
+            result = self.client.query(
+                "SELECT toDate(created_at) AS day, count() AS count "
+                "FROM agent_spans " + where + "GROUP BY day ORDER BY day",
+                parameters=user_params if user_params else {},
+            )
+        return [dict(zip(result.column_names, row)) for row in result.result_rows]
+
     # ------------------------------------------------------------------
     # Batch validation
     # ------------------------------------------------------------------
 
-    def check_session_ids_exist(self, session_ids: list[str]) -> set[str]:
+    def check_session_ids_exist(self, session_ids: list[str], user_id: str | None = None) -> set[str]:
         """Return the subset of session_ids that exist in agent_sessions."""
         if not session_ids:
             return set()
         with self._lock:
-            result = self.client.query(
-                "SELECT id FROM agent_sessions WHERE id IN {ids:Array(String)}",
-                parameters={"ids": list(session_ids)},
-            )
+            if user_id:
+                result = self.client.query(
+                    "SELECT id FROM agent_sessions WHERE id IN {ids:Array(String)} AND user_id = {uid:String}",
+                    parameters={"ids": list(session_ids), "uid": user_id},
+                )
+            else:
+                result = self.client.query(
+                    "SELECT id FROM agent_sessions WHERE id IN {ids:Array(String)}",
+                    parameters={"ids": list(session_ids)},
+                )
         return {row[0] for row in result.result_rows}
 
     # ------------------------------------------------------------------
@@ -717,6 +787,66 @@ class ClickHouseClient:
             except (json.JSONDecodeError, TypeError):
                 d["data"] = {}
         return d
+
+    def delete_all(self, user_id: str | None = None) -> dict[str, int]:
+        """Delete agent data. If *user_id* is given, only that user's data
+        is removed; otherwise **all** data is truncated.
+
+        Returns approximate counts of deleted rows.
+        """
+        if not user_id:
+            # Legacy path: wipe everything
+            counts: dict[str, int] = {}
+            for table in ("agent_spans", "agent_trajectories", "agent_sessions"):
+                with self._lock:
+                    result = self.client.query(f"SELECT count() AS cnt FROM {table}")
+                    counts[table] = result.result_rows[0][0] if result.result_rows else 0
+                    self.client.command(f"TRUNCATE TABLE {table}")
+            return counts
+
+        with self._lock:
+            # Count rows belonging to this user
+            result = self.client.query(
+                "SELECT count() AS cnt FROM agent_sessions WHERE user_id = {uid:String}",
+                parameters={"uid": user_id},
+            )
+            session_count = result.result_rows[0][0] if result.result_rows else 0
+
+            result = self.client.query(
+                "SELECT count() AS cnt FROM agent_spans "
+                "WHERE agent_session_id IN (SELECT id FROM agent_sessions WHERE user_id = {uid:String})",
+                parameters={"uid": user_id},
+            )
+            span_count = result.result_rows[0][0] if result.result_rows else 0
+
+            result = self.client.query(
+                "SELECT count() AS cnt FROM agent_trajectories "
+                "WHERE agent_session_id IN (SELECT id FROM agent_sessions WHERE user_id = {uid:String})",
+                parameters={"uid": user_id},
+            )
+            traj_count = result.result_rows[0][0] if result.result_rows else 0
+
+            # Delete in order: spans/trajectories first, then sessions
+            self.client.command(
+                "ALTER TABLE agent_spans DELETE "
+                "WHERE agent_session_id IN (SELECT id FROM agent_sessions WHERE user_id = {uid:String})",
+                parameters={"uid": user_id},
+            )
+            self.client.command(
+                "ALTER TABLE agent_trajectories DELETE "
+                "WHERE agent_session_id IN (SELECT id FROM agent_sessions WHERE user_id = {uid:String})",
+                parameters={"uid": user_id},
+            )
+            self.client.command(
+                "ALTER TABLE agent_sessions DELETE WHERE user_id = {uid:String}",
+                parameters={"uid": user_id},
+            )
+
+        return {
+            "agent_sessions": session_count,
+            "agent_spans": span_count,
+            "agent_trajectories": traj_count,
+        }
 
     def close(self) -> None:
         if self.client:

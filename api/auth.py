@@ -1,8 +1,7 @@
-"""Auth utilities for rllm-ui cloud mode.
+"""Auth utilities for rllm-ui.
 
-A single env var DEPLOYMENT_MODE (default "local") controls everything.
-When "local", the app behaves exactly as today - no auth.
-When "cloud", full auth is enforced.
+Auth is always enforced. DEPLOYMENT_MODE controls cookie security
+(cloud = secure cookies for HTTPS) and agent key resolution.
 """
 
 import os
@@ -17,10 +16,10 @@ from fastapi import Depends, HTTPException, Request
 # ── Config constants ──────────────────────────────────────────────
 
 DEPLOYMENT_MODE = os.environ.get("DEPLOYMENT_MODE", "local")  # "local" | "cloud"
-IS_CLOUD = DEPLOYMENT_MODE == "cloud"
-JWT_SECRET = os.environ.get("JWT_SECRET", "")
+SECURE_COOKIES = DEPLOYMENT_MODE == "cloud"  # HTTPS-only cookies in cloud mode
+JWT_SECRET = os.environ.get("JWT_SECRET", "local-dev-secret")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRY_HOURS = 72
+JWT_EXPIRY_HOURS = 168
 COOKIE_NAME = "rllm_session"
 API_KEY_HEADER = "X-API-Key"
 
@@ -101,21 +100,21 @@ def generate_api_key() -> str:
 
 # ── FastAPI dependency ────────────────────────────────────────────
 
-async def get_current_user(request: Request) -> dict | None:
+async def get_current_user(request: Request) -> dict:
     """Core auth dependency.
 
-    - If IS_CLOUD is False -> returns None (no auth enforced)
-    - If IS_CLOUD is True -> checks X-API-Key header, then JWT cookie
-    - Raises 401 if no valid auth found in cloud mode
-    - Attaches ``impersonator_id`` to the user dict when impersonating
+    Checks X-API-Key header, then JWT cookie.
+    Raises 401 if no valid auth found.
+    Attaches ``impersonator_id`` to the user dict when impersonating.
     """
-    if not IS_CLOUD:
-        return None
-
     store = request.app.state.store
 
-    # 1. Check API key header
+    # 1. Check API key header (X-API-Key or Authorization: Bearer <key>)
     api_key = request.headers.get(API_KEY_HEADER)
+    if not api_key:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            api_key = auth_header[7:]
     if api_key:
         user = store.get_user_by_api_key(api_key)
         if user:
@@ -138,4 +137,4 @@ async def get_current_user(request: Request) -> dict | None:
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
-CurrentUser = Annotated[dict | None, Depends(get_current_user)]
+CurrentUser = Annotated[dict, Depends(get_current_user)]

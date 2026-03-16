@@ -22,15 +22,18 @@ def list_skills(
     user: CurrentUser,
     is_active: bool | None = Query(None),
     category: str | None = Query(None),
+    session_id: str | None = Query(None),
 ):
     store = request.app.state.store
-    return store.get_skills(is_active=is_active, category=category)
+    if session_id:
+        return store.get_skills_for_session(session_id, user_id=user["id"])
+    return store.get_skills(is_active=is_active, category=category, user_id=user["id"])
 
 
 @router.get("/{skill_id}", response_model=SkillResponse)
 def get_skill(request: Request, skill_id: str, user: CurrentUser):
     store = request.app.state.store
-    skill = store.get_skill(skill_id)
+    skill = store.get_skill(skill_id, user_id=user["id"])
     if skill is None:
         raise HTTPException(status_code=404, detail="Skill not found")
     return skill
@@ -39,7 +42,7 @@ def get_skill(request: Request, skill_id: str, user: CurrentUser):
 @router.patch("/{skill_id}", response_model=SkillResponse)
 def update_skill(request: Request, skill_id: str, body: SkillUpdate, user: CurrentUser):
     store = request.app.state.store
-    result = store.update_skill(skill_id, body.model_dump(exclude_unset=True))
+    result = store.update_skill(skill_id, body.model_dump(exclude_unset=True), user_id=user["id"])
     if result is None:
         raise HTTPException(status_code=404, detail="Skill not found")
     return result
@@ -49,14 +52,14 @@ def update_skill(request: Request, skill_id: str, body: SkillUpdate, user: Curre
 def delete_all_skills(request: Request, user: CurrentUser):
     """Delete ALL skills. For local testing only."""
     store = request.app.state.store
-    count = store.delete_all_skills()
+    count = store.delete_all_skills(user_id=user["id"])
     return {"ok": True, "deleted": count}
 
 
 @router.delete("/{skill_id}")
 def delete_skill(request: Request, skill_id: str, user: CurrentUser):
     store = request.app.state.store
-    deleted = store.delete_skill(skill_id)
+    deleted = store.delete_skill(skill_id, user_id=user["id"])
     if not deleted:
         raise HTTPException(status_code=404, detail="Skill not found")
     return {"ok": True}
@@ -88,7 +91,7 @@ def _format_skill_md(skill: dict) -> str:
 @router.get("/{skill_id}/export")
 def export_skill(request: Request, skill_id: str, user: CurrentUser):
     store = request.app.state.store
-    skill = store.get_skill(skill_id)
+    skill = store.get_skill(skill_id, user_id=user["id"])
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     md = _format_skill_md(skill)
@@ -143,7 +146,7 @@ async def trigger_distillation(
     else:
         logger.info(f"No session_ids in request body — fetching all sessions from {source}")
         try:
-            sessions = span_client.get_agent_sessions()
+            sessions = span_client.get_agent_sessions(user_id=user["id"])
             session_ids = [s["id"] for s in sessions]
             logger.info(f"Found {len(session_ids)} sessions in {source}")
         except Exception:
@@ -163,7 +166,7 @@ async def trigger_distillation(
         logger.info(f"Distillation completed: {len(created_ids)} skills created")
 
         # Return the newly created skills
-        return [store.get_skill(sid) for sid in created_ids if store.get_skill(sid)]
+        return [store.get_skill(sid, user_id=user["id"]) for sid in created_ids if store.get_skill(sid, user_id=user["id"])]
     except Exception:
         logger.exception("Distillation failed")
         raise HTTPException(status_code=500, detail="Distillation failed — check server logs")

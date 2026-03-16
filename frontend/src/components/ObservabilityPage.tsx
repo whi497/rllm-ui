@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useMemo, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ActivityIcon, SearchIcon, BarChartIcon, ListIcon, DatabaseIcon } from "./icons";
 import { Spinner, EmptyState } from "./ui";
 import { apiFetch } from "../config/api";
@@ -15,6 +15,7 @@ interface AgentSession {
   metadata: Record<string, any> | null;
   created_at: string;
   completed_at: string | null;
+  span_count: number | null;
 }
 
 interface PaginatedSessions {
@@ -73,18 +74,53 @@ function formatDuration(start: string, end: string | null): string {
 
 type ViewMode = "dashboard" | "sessions";
 
+const TrashIcon: React.FC<{ size?: number; className?: string }> = ({ size = 16, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+  </svg>
+);
+
 const PAGE_SIZE = 20;
+
+const ENABLED_SOURCES: DataSource[] = ["postgres", "clickhouse"]; // bigquery temporarily disabled
+const VALID_SOURCES: DataSource[] = ["postgres", "clickhouse", "bigquery"];
+const VALID_VIEWS: ViewMode[] = ["dashboard", "sessions"];
 
 export const ObservabilityPage: React.FC = () => {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Initialize state from URL search params
+  const initSource = ENABLED_SOURCES.includes(searchParams.get("source") as DataSource)
+    ? (searchParams.get("source") as DataSource)
+    : "postgres";
+  const initView = VALID_VIEWS.includes(searchParams.get("view") as ViewMode)
+    ? (searchParams.get("view") as ViewMode)
+    : "dashboard";
+  const initPage = Math.max(0, parseInt(searchParams.get("page") || "0", 10) || 0);
+
   const [sessions, setSessions] = useState<AgentSession[]>([]);
   const [totalSessions, setTotalSessions] = useState(0);
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(initPage);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [viewMode, setViewMode] = useState<ViewMode>("dashboard");
-  const [dataSource, setDataSource] = useState<DataSource>("clickhouse");
+  const [viewMode, setViewMode] = useState<ViewMode>(initView);
+  const [dataSource, setDataSource] = useState<DataSource>(initSource);
   const initialLoadDone = useRef(false);
+  const [deleteConfirmSource, setDeleteConfirmSource] = useState<DataSource | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Keep URL in sync (replaceState to avoid polluting history)
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (dataSource !== "postgres") params.set("source", dataSource);
+    if (viewMode !== "dashboard") params.set("view", viewMode);
+    if (page > 0) params.set("page", String(page));
+    const qs = params.toString();
+    const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState(window.history.state, "", url);
+  }, [dataSource, viewMode, page]);
 
   const fetchSessions = useCallback(async () => {
     if (!initialLoadDone.current) setLoading(true);
@@ -118,12 +154,48 @@ export const ObservabilityPage: React.FC = () => {
   const hasRunning = sessions.some((s) => s.status === "running");
   usePolling(fetchSessions, { interval: hasRunning ? 5000 : 30000 });
 
+  // Fetch immediately when page or dataSource changes (polling hook only fires on interval)
+  const prevPage = useRef(page);
+  const prevSource = useRef(dataSource);
+  useEffect(() => {
+    if (prevPage.current !== page || prevSource.current !== dataSource) {
+      prevPage.current = page;
+      prevSource.current = dataSource;
+      fetchSessions();
+    }
+  }, [page, dataSource, fetchSessions]);
+
   // Reset page when switching data source
   const handleSourceChange = (source: DataSource) => {
     setDataSource(source);
     setPage(0);
     initialLoadDone.current = false;
     setLoading(true);
+  };
+
+  const handleDeleteAll = async () => {
+    if (!deleteConfirmSource) return;
+    setDeleting(true);
+    try {
+      const resp = await apiFetch(`/api/agent-sessions/all?source=${deleteConfirmSource}`, {
+        method: "DELETE",
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        alert(`Delete failed: ${body.detail || resp.statusText}`);
+        return;
+      }
+      // Refresh data
+      setDeleteConfirmSource(null);
+      initialLoadDone.current = false;
+      setPage(0);
+      setLoading(true);
+      fetchSessions();
+    } catch (err) {
+      alert(`Delete failed: ${err}`);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const filtered = useMemo(() => {
@@ -157,20 +229,33 @@ export const ObservabilityPage: React.FC = () => {
             {/* Data source toggle */}
             <div className="flex items-center gap-1.5 bg-gray-100 rounded-lg p-0.5">
               <DatabaseIcon size={13} className="text-gray-400 ml-2" />
-              {(["clickhouse", "bigquery", "postgres"] as const).map((src) => (
+              {(["postgres", "clickhouse", "bigquery"] as const).map((src) => (
                 <button
                   key={src}
-                  onClick={() => handleSourceChange(src)}
+                  onClick={() => src !== "bigquery" && handleSourceChange(src)}
+                  disabled={src === "bigquery"}
                   className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                    dataSource === src
-                      ? "bg-white text-gray-900 shadow-sm"
-                      : "text-gray-500 hover:text-gray-700"
+                    src === "bigquery"
+                      ? "text-gray-300 cursor-not-allowed"
+                      : dataSource === src
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700"
                   }`}
+                  title={src === "bigquery" ? "Coming soon" : undefined}
                 >
                   {DATA_SOURCE_LABELS[src]}
+                  {src === "bigquery" && <span className="ml-1 text-[10px] text-gray-300">(coming soon)</span>}
                 </button>
               ))}
             </div>
+            <button
+              onClick={() => setDeleteConfirmSource(dataSource)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-red-600 hover:bg-red-50 transition-all"
+              title={`Delete all ${DATA_SOURCE_LABELS[dataSource]} data`}
+            >
+              <TrashIcon size={13} />
+              Delete All
+            </button>
           </div>
           <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
             <button
@@ -244,6 +329,7 @@ export const ObservabilityPage: React.FC = () => {
                       <tr>
                         <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Name</th>
                         <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Status</th>
+                        <th className="px-3 py-3 text-right text-sm font-medium text-gray-500">Spans</th>
                         <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Duration</th>
                         <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Created</th>
                         <th className="px-3 py-3 text-left text-sm font-medium text-gray-500">Session ID</th>
@@ -261,6 +347,9 @@ export const ObservabilityPage: React.FC = () => {
                           <td className="px-3 py-2.5 text-sm font-medium text-gray-900">{session.name}</td>
                           <td className="px-3 py-2.5">
                             <StatusBadge status={session.status} />
+                          </td>
+                          <td className="px-3 py-2.5 text-sm text-gray-500 text-right tabular-nums">
+                            {session.span_count ?? "-"}
                           </td>
                           <td className="px-3 py-2.5 text-sm text-gray-500">
                             {formatDuration(session.created_at, session.completed_at)}
@@ -329,6 +418,57 @@ export const ObservabilityPage: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* Delete confirmation modal */}
+      {deleteConfirmSource && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/50" onClick={() => !deleting && setDeleteConfirmSource(null)} />
+          <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+            <h3 className="text-base font-semibold text-gray-900 mb-2">
+              Delete all {DATA_SOURCE_LABELS[deleteConfirmSource]} data?
+            </h3>
+            <p className="text-sm text-gray-600 mb-1">
+              This will permanently delete:
+            </p>
+            <ul className="text-sm text-gray-600 mb-4 list-disc list-inside space-y-0.5">
+              <li>All sessions and spans in <span className="font-medium">{DATA_SOURCE_LABELS[deleteConfirmSource]}</span></li>
+              <li>All distilled skills</li>
+              <li>All session clusters</li>
+              <li>All eval results and uploads</li>
+              <li>All background jobs</li>
+            </ul>
+            <p className="text-xs text-red-600 font-medium mb-4">
+              This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteConfirmSource(null)}
+                disabled={deleting}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAll}
+                disabled={deleting}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {deleting ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete Everything"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

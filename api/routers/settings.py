@@ -1,6 +1,6 @@
 """Settings router — per-user key-value settings (cloud mode only)."""
 
-from auth import CurrentUser, IS_CLOUD
+from auth import CurrentUser
 from encryption import encrypt_value, decrypt_value
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -24,8 +24,8 @@ class SettingValue(BaseModel):
 @router.get("")
 def get_settings(request: Request, user: CurrentUser):
     """Return all user settings with sensitive values masked."""
-    if not IS_CLOUD or not user:
-        raise HTTPException(status_code=404, detail="Settings not available in local mode")
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     store = request.app.state.store
     encrypted_settings = store.get_user_settings(user["id"])
@@ -50,8 +50,8 @@ def get_settings(request: Request, user: CurrentUser):
 @router.put("/{key}")
 def set_setting(request: Request, key: str, body: SettingValue, user: CurrentUser):
     """Store a setting (encrypted at rest)."""
-    if not IS_CLOUD or not user:
-        raise HTTPException(status_code=404, detail="Settings not available in local mode")
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     if key not in ALLOWED_KEYS:
         raise HTTPException(status_code=400, detail=f"Unknown setting: {key}")
     if not body.value.strip():
@@ -66,8 +66,8 @@ def set_setting(request: Request, key: str, body: SettingValue, user: CurrentUse
 @router.delete("/{key}")
 def delete_setting(request: Request, key: str, user: CurrentUser):
     """Remove a setting."""
-    if not IS_CLOUD or not user:
-        raise HTTPException(status_code=404, detail="Settings not available in local mode")
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     if key not in ALLOWED_KEYS:
         raise HTTPException(status_code=400, detail=f"Unknown setting: {key}")
 

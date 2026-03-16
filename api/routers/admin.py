@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
-from auth import COOKIE_NAME, IS_CLOUD, CurrentUser, create_jwt
+from auth import COOKIE_NAME, SECURE_COOKIES, CurrentUser, create_jwt
 from models import AdminUserResponse
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -27,8 +27,6 @@ def _require_superuser(user: dict | None) -> dict:
 @router.get("/users", response_model=list[AdminUserResponse])
 def list_users(request: Request, user: CurrentUser):
     """List all users (superuser only)."""
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404)
     _require_superuser(user)
     store = request.app.state.store
     rows = store.get_all_users()
@@ -48,8 +46,6 @@ def impersonate(request: Request, response: Response, target_user_id: str, user:
     ``impersonator`` claim so the frontend can show a banner and
     the original session can be restored.
     """
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404)
     su = _require_superuser(user)
     store = request.app.state.store
 
@@ -63,7 +59,7 @@ def impersonate(request: Request, response: Response, target_user_id: str, user:
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=True,
+        secure=SECURE_COOKIES,
         samesite="lax",
         max_age=72 * 3600,
     )
@@ -73,8 +69,6 @@ def impersonate(request: Request, response: Response, target_user_id: str, user:
 @router.post("/stop-impersonate")
 def stop_impersonate(request: Request, response: Response, user: CurrentUser):
     """Stop impersonating and revert to the original superuser session."""
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404)
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -93,7 +87,7 @@ def stop_impersonate(request: Request, response: Response, user: CurrentUser):
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=True,
+        secure=SECURE_COOKIES,
         samesite="lax",
         max_age=72 * 3600,
     )

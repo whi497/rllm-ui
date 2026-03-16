@@ -3,13 +3,13 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
-  AreaChart,
-  Area,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  AreaChart,
+  Area,
   BarChart,
   Bar,
 } from "recharts";
@@ -28,6 +28,11 @@ import { usePolling } from "../hooks/usePolling";
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+interface SpanActivityBucket {
+  day: string;
+  count: number;
+}
 
 interface DashboardStats {
   total_spans: number;
@@ -104,8 +109,16 @@ function formatBucketTime(iso: string): string {
   return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-function formatBucketDate(iso: string): string {
-  const d = new Date(iso);
+function formatDayRange(data: SpanActivityBucket[]): string {
+  if (data.length === 0) return "";
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  const first = new Date(data[0].day + "T00:00:00");
+  const last = new Date(data[data.length - 1].day + "T00:00:00");
+  return `${first.toLocaleDateString("en-US", opts)} – ${last.toLocaleDateString("en-US", opts)}`;
+}
+
+function formatDay(iso: string): string {
+  const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
@@ -133,10 +146,10 @@ const KpiCard: React.FC<{
 );
 
 // ---------------------------------------------------------------------------
-// Timeseries Chart
+// Span Activity Chart (daily counts, full time range)
 // ---------------------------------------------------------------------------
 
-const TimeseriesChart: React.FC<{ data: TimeseriesBucket[] }> = ({ data }) => {
+const SpanActivityChart: React.FC<{ data: SpanActivityBucket[] }> = ({ data }) => {
   if (data.length === 0) {
     return (
       <div className="h-[200px] flex items-center justify-center text-sm text-gray-400">
@@ -145,22 +158,20 @@ const TimeseriesChart: React.FC<{ data: TimeseriesBucket[] }> = ({ data }) => {
     );
   }
 
-  // Show date label only when the day changes
-  let lastDate = "";
-  const chartData = data.map((b) => {
-    const date = formatBucketDate(b.bucket);
-    const showDate = date !== lastDate;
-    lastDate = date;
-    return {
-      ...b,
-      time: formatBucketTime(b.bucket),
-      label: showDate ? `${date} ${formatBucketTime(b.bucket)}` : formatBucketTime(b.bucket),
-    };
-  });
+  const chartData = data.map((b) => ({
+    ...b,
+    label: formatDay(b.day),
+  }));
 
   return (
     <ResponsiveContainer width="100%" height={200}>
       <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+        <defs>
+          <linearGradient id="spanActivityGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.25} />
+            <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+          </linearGradient>
+        </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
         <XAxis
           dataKey="label"
@@ -177,35 +188,9 @@ const TimeseriesChart: React.FC<{ data: TimeseriesBucket[] }> = ({ data }) => {
         />
         <Tooltip
           contentStyle={{ fontSize: 12, border: "1px solid #e5e7eb", borderRadius: 8 }}
-          labelStyle={{ fontWeight: 600, marginBottom: 4 }}
+          formatter={(value) => [formatNumber(Number(value ?? 0)), "Spans"]}
         />
-        <Area
-          type="monotone"
-          dataKey="llm_calls"
-          name="LLM Calls"
-          stackId="1"
-          stroke="#f59e0b"
-          fill="#fef3c7"
-          strokeWidth={1.5}
-        />
-        <Area
-          type="monotone"
-          dataKey="tool_calls"
-          name="Tool Calls"
-          stackId="1"
-          stroke="#10b981"
-          fill="#d1fae5"
-          strokeWidth={1.5}
-        />
-        <Area
-          type="monotone"
-          dataKey="agent_spans"
-          name="Agent"
-          stackId="1"
-          stroke="#8b5cf6"
-          fill="#ede9fe"
-          strokeWidth={1.5}
-        />
+        <Area type="monotone" dataKey="count" stroke="#8b5cf6" strokeWidth={2.5} fill="url(#spanActivityGradient)" />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -441,24 +426,32 @@ const DistilledSkillsPanel: React.FC = () => {
 // Main Dashboard Component
 // ---------------------------------------------------------------------------
 
-export const ObservabilityDashboard: React.FC<{ dataSource?: string }> = ({ dataSource = "clickhouse" }) => {
+export const ObservabilityDashboard: React.FC<{ dataSource?: string }> = ({ dataSource = "postgres" }) => {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [spanActivity, setSpanActivity] = useState<SpanActivityBucket[]>([]);
   const [loading, setLoading] = useState(true);
   const initialLoadDone = useRef(false);
 
   const fetchDashboard = useCallback(async () => {
     if (!initialLoadDone.current) setLoading(true);
     try {
-      const resp = await apiFetch(`/api/agent-sessions/dashboard?days=7&source=${dataSource}`);
-      if (!resp.ok) {
-        if (resp.status === 503) {
+      const [dashResp, actResp] = await Promise.all([
+        apiFetch(`/api/agent-sessions/dashboard?days=7&source=${dataSource}`),
+        apiFetch(`/api/agent-sessions/span-activity?source=${dataSource}`),
+      ]);
+      if (!dashResp.ok) {
+        if (dashResp.status === 503) {
           setData(null);
           return;
         }
         throw new Error("Failed to fetch dashboard");
       }
-      const d: DashboardData = await resp.json();
+      const d: DashboardData = await dashResp.json();
       setData(d);
+      if (actResp.ok) {
+        const a: { buckets: SpanActivityBucket[] } = await actResp.json();
+        setSpanActivity(a.buckets);
+      }
     } catch {
       if (!initialLoadDone.current) setData(null);
     } finally {
@@ -472,6 +465,7 @@ export const ObservabilityDashboard: React.FC<{ dataSource?: string }> = ({ data
     initialLoadDone.current = false;
     setLoading(true);
     setData(null);
+    setSpanActivity([]);
   }, [dataSource]);
 
   usePolling(fetchDashboard, { interval: 60000 });
@@ -539,8 +533,13 @@ export const ObservabilityDashboard: React.FC<{ dataSource?: string }> = ({ data
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">Span Activity</h3>
-          <TimeseriesChart data={timeseries} />
+          <div className="flex items-baseline gap-2 mb-3">
+            <h3 className="text-sm font-semibold text-gray-900">Span Activity</h3>
+            {spanActivity.length > 0 && (
+              <span className="text-[11px] text-gray-400">{formatDayRange(spanActivity)}</span>
+            )}
+          </div>
+          <SpanActivityChart data={spanActivity} />
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <h3 className="text-sm font-semibold text-gray-900 mb-3">Token Usage</h3>

@@ -4,10 +4,11 @@ import csv
 import io
 import json
 import time
+from datetime import datetime, timezone
 
 from auth import CurrentUser
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from models import SpanUploadResponse, SpanUploadSessionResponse
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from models import SpanUploadListResponse, SpanUploadResponse, SpanUploadSessionListResponse, SpanUploadSessionResponse
 
 router = APIRouter(prefix="/api/span-uploads", tags=["span-uploads"])
 
@@ -19,16 +20,17 @@ VALID_SPAN_TYPES = frozenset({
     "tool.start", "tool.end",
     "agent.start", "agent.end",
     "invocation.start", "invocation.end",
-    "event", "session",
+    "event", "session", "session.start", "tool.data",
 })
 
 # Span types that are meaningful for downstream tasks (distillation, post-training)
 MEANINGFUL_SPAN_TYPES = frozenset({
     "trajectory.start", "trajectory.step", "trajectory.end",
     "llm.start", "llm.end",
-    "tool.start", "tool.end",
+    "tool.start", "tool.end", "tool.data",
     "agent.start", "agent.end",
     "invocation.start", "invocation.end",
+    "session.start",
 })
 
 
@@ -100,15 +102,29 @@ async def upload_span_csv(request: Request, user: CurrentUser, file: UploadFile 
             "error": (row.get("error") or "").strip() or None,
         }
 
-        # Parse numeric optional columns
-        for col in ("duration_ms", "started_at", "ended_at"):
+        # Parse duration
+        dur_val = (row.get("duration_ms") or "").strip()
+        if dur_val:
+            try:
+                span["duration_ms"] = float(dur_val)
+            except ValueError:
+                errors.append(f"Row {i}: invalid number in duration_ms: '{dur_val}'")
+
+        # Parse timestamp columns (accept both epoch floats and ISO 8601 strings)
+        for col in ("started_at", "ended_at"):
             val = (row.get(col) or "").strip()
             if val:
                 try:
                     span[col] = float(val)
                 except ValueError:
-                    errors.append(f"Row {i}: invalid number in {col}: '{val}'")
-                    continue
+                    try:
+                        dt = datetime.fromisoformat(val)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        span[col] = dt.timestamp()
+                    except ValueError:
+                        errors.append(f"Row {i}: invalid timestamp in {col}: '{val}'")
+                        continue
 
         for col in ("input_tokens", "output_tokens", "total_tokens"):
             val = (row.get(col) or "").strip()
@@ -148,7 +164,7 @@ async def upload_span_csv(request: Request, user: CurrentUser, file: UploadFile 
     # ── Check for duplicate session_ids against existing imports ───
     pg_spans = getattr(request.app.state, "postgres_spans", None)
     if pg_spans:
-        existing = pg_spans.check_session_ids_exist(list(sessions.keys()))
+        existing = pg_spans.check_session_ids_exist(list(sessions.keys()), user_id=user["id"])
         if existing:
             raise HTTPException(
                 status_code=409,
@@ -166,29 +182,44 @@ async def upload_span_csv(request: Request, user: CurrentUser, file: UploadFile 
         upload_id=upload_id,
         filename=file.filename,
         sessions=sessions,
+        user_id=user["id"],
     )
     return result
 
 
-@router.get("", response_model=list[SpanUploadResponse])
-def list_span_uploads(request: Request, user: CurrentUser):
-    """List all past span uploads."""
+@router.get("", response_model=SpanUploadListResponse)
+def list_span_uploads(
+    request: Request,
+    user: CurrentUser,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """List past span uploads with pagination."""
     pg_spans = getattr(request.app.state, "postgres_spans", None)
     if not pg_spans:
-        return []
-    return pg_spans.get_span_uploads()
+        return SpanUploadListResponse(uploads=[], total=0)
+    uploads = pg_spans.get_span_uploads(limit=limit, offset=offset, user_id=user["id"])
+    total = pg_spans.count_span_uploads(user_id=user["id"])
+    return SpanUploadListResponse(uploads=uploads, total=total)
 
 
-@router.get("/{upload_id}/sessions", response_model=list[SpanUploadSessionResponse])
-def get_span_upload_sessions(request: Request, upload_id: str, user: CurrentUser):
-    """Get sessions for a specific upload."""
+@router.get("/{upload_id}/sessions", response_model=SpanUploadSessionListResponse)
+def get_span_upload_sessions(
+    request: Request,
+    upload_id: str,
+    user: CurrentUser,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """Get sessions for a specific upload with pagination."""
     pg_spans = getattr(request.app.state, "postgres_spans", None)
     if not pg_spans:
         raise HTTPException(status_code=404, detail="Upload not found")
-    sessions = pg_spans.get_span_upload_sessions(upload_id)
+    sessions = pg_spans.get_span_upload_sessions(upload_id, limit=limit, offset=offset, user_id=user["id"])
     if sessions is None:
         raise HTTPException(status_code=404, detail="Upload not found")
-    return sessions
+    total = pg_spans.count_span_upload_sessions(upload_id)  # count is scoped by upload which is already owned
+    return SpanUploadSessionListResponse(sessions=sessions, total=total)
 
 
 @router.delete("/{upload_id}")
@@ -197,7 +228,7 @@ def delete_span_upload(request: Request, upload_id: str, user: CurrentUser):
     pg_spans = getattr(request.app.state, "postgres_spans", None)
     if not pg_spans:
         raise HTTPException(status_code=404, detail="Upload not found")
-    deleted = pg_spans.delete_span_upload(upload_id)
+    deleted = pg_spans.delete_span_upload(upload_id, user_id=user["id"])
     if not deleted:
         raise HTTPException(status_code=404, detail="Upload not found")
     return {"ok": True}

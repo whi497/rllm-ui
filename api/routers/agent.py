@@ -3,7 +3,7 @@
 import json
 import logging
 
-from auth import CurrentUser, IS_CLOUD
+from auth import CurrentUser
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -15,27 +15,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 
-def _resolve_agent(request: Request, user: dict | None):
+def _resolve_agent(request: Request, user: dict):
     """Return an ObservabilityAgent for this request.
 
-    Cloud mode: only per-user keys (configured in Settings).
-    Local mode: global agent from ANTHROPIC_API_KEY env var.
+    Tries per-user key first (from Settings), then falls back to
+    the global agent initialized from ANTHROPIC_API_KEY env var.
     """
-    if IS_CLOUD:
-        if user:
-            from encryption import decrypt_value
+    store = request.app.state.store
 
-            store = request.app.state.store
-            settings = store.get_user_settings(user["id"])
-            encrypted_key = settings.get("anthropic_api_key")
-            if encrypted_key:
-                api_key = decrypt_value(encrypted_key)
-                from agent import ObservabilityAgent
+    # 1. Try per-user key (configured in Settings)
+    try:
+        from encryption import decrypt_value
 
-                return ObservabilityAgent(datastore=store, api_key=api_key)
-        return None  # no fallback to global agent in cloud mode
+        settings = store.get_user_settings(user["id"])
+        encrypted_key = settings.get("anthropic_api_key")
+        if encrypted_key:
+            api_key = decrypt_value(encrypted_key)
+            from agent import ObservabilityAgent
 
-    # Local mode: use global agent
+            return ObservabilityAgent(datastore=store, api_key=api_key)
+    except Exception:
+        pass
+
+    # 2. Fall back to global agent (from ANTHROPIC_API_KEY env var)
     return getattr(request.app.state, "agent", None)
 
 
@@ -71,7 +73,7 @@ class ChatResponse(BaseModel):
 def list_chat_sessions(request: Request, session_id: str, user: CurrentUser):
     """List all chat sessions for a training run."""
     store = request.app.state.store
-    sessions = store.get_chat_sessions(session_id)
+    sessions = store.get_chat_sessions(session_id, user_id=user["id"])
     return sessions
 
 
@@ -79,7 +81,7 @@ def list_chat_sessions(request: Request, session_id: str, user: CurrentUser):
 def create_chat_session(request: Request, body: ChatSessionCreate, user: CurrentUser):
     """Create a new chat session for a training run."""
     store = request.app.state.store
-    session = store.create_chat_session(body.session_id, body.title)
+    session = store.create_chat_session(body.session_id, body.title, user_id=user["id"])
     return session
 
 
@@ -87,7 +89,7 @@ def create_chat_session(request: Request, body: ChatSessionCreate, user: Current
 def delete_chat_session(request: Request, chat_session_id: str, user: CurrentUser):
     """Delete a chat session and all its messages."""
     store = request.app.state.store
-    deleted = store.delete_chat_session(chat_session_id)
+    deleted = store.delete_chat_session(chat_session_id, user_id=user["id"])
     if not deleted:
         raise HTTPException(status_code=404, detail="Chat session not found")
     return {"ok": True}
@@ -97,7 +99,7 @@ def delete_chat_session(request: Request, chat_session_id: str, user: CurrentUse
 def get_chat_messages(request: Request, chat_session_id: str, user: CurrentUser):
     """Get all messages for a chat session."""
     store = request.app.state.store
-    messages = store.get_chat_messages(chat_session_id)
+    messages = store.get_chat_messages(chat_session_id, user_id=user["id"])
     return messages
 
 
@@ -113,11 +115,7 @@ def chat(request: Request, body: ChatRequest, user: CurrentUser):
     """
     agent = _resolve_agent(request, user)
     if agent is None:
-        detail = (
-            "Agent not available. Configure your Anthropic API key in Settings."
-            if IS_CLOUD
-            else "Agent not available. Set the ANTHROPIC_API_KEY environment variable."
-        )
+        detail = "Agent not available. Configure your Anthropic API key in Settings or set the ANTHROPIC_API_KEY environment variable."
         raise HTTPException(status_code=503, detail=detail)
 
     try:
@@ -148,11 +146,7 @@ def chat_stream(request: Request, body: ChatRequest, user: CurrentUser):
     """
     agent = _resolve_agent(request, user)
     if agent is None:
-        detail = (
-            "Agent not available. Configure your Anthropic API key in Settings."
-            if IS_CLOUD
-            else "Agent not available. Set the ANTHROPIC_API_KEY environment variable."
-        )
+        detail = "Agent not available. Configure your Anthropic API key in Settings or set the ANTHROPIC_API_KEY environment variable."
         raise HTTPException(status_code=503, detail=detail)
 
     store = request.app.state.store
@@ -170,9 +164,9 @@ def chat_stream(request: Request, body: ChatRequest, user: CurrentUser):
                 title = body.message[:50].strip()
                 if len(body.message) > 50:
                     title += "..."
-                cs = store.create_chat_session(body.session_id, title)
+                cs = store.create_chat_session(body.session_id, title, user_id=user["id"])
                 chat_session_id = cs["id"]
-            store.append_chat_message(chat_session_id, "user", body.message)
+            store.append_chat_message(chat_session_id, "user", body.message, user_id=user["id"])
         except Exception:
             pass  # Don't block the stream on persistence errors
 
@@ -198,7 +192,7 @@ def chat_stream(request: Request, body: ChatRequest, user: CurrentUser):
             # Save assistant response even if client disconnected mid-stream
             if chat_session_id and full_response.strip():
                 try:
-                    store.append_chat_message(chat_session_id, "assistant", full_response)
+                    store.append_chat_message(chat_session_id, "assistant", full_response, user_id=user["id"])
                 except Exception:
                     pass
 

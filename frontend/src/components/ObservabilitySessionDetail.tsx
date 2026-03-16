@@ -47,6 +47,27 @@ export interface Span {
   created_at: string;
 }
 
+interface SkillRef {
+  id: string;
+  title: string;
+  category: string;
+  reward_delta: number;
+  confidence: number;
+}
+
+interface EvalRow {
+  id: number;
+  ground_truth: string;
+  rating: string;
+  trajectory_alignment: string;
+  task_success: string;
+  tags: string;
+  reference_trajectory: string;
+  reference_state: string;
+  reference_answer: string;
+  upload_id: string;
+}
+
 // Tree node for hierarchical span view
 interface SpanNode {
   span: Span;
@@ -67,6 +88,7 @@ const SPAN_TYPE_COLORS: Record<string, { bg: string; text: string; border: strin
   "llm.end": { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", bar: "bg-amber-400" },
   "tool.start": { bg: "bg-green-50", text: "text-green-700", border: "border-green-200", bar: "bg-green-400" },
   "tool.end": { bg: "bg-green-50", text: "text-green-700", border: "border-green-200", bar: "bg-green-400" },
+  "tool.data": { bg: "bg-gray-100", text: "text-gray-700", border: "border-gray-300", bar: "bg-gray-500" },
   event: { bg: "bg-gray-50", text: "text-gray-600", border: "border-gray-200", bar: "bg-gray-400" },
 };
 
@@ -158,8 +180,16 @@ function buildSpanTree(spans: Span[]): SpanNode[] {
 
     const node: SpanNode = { span, children: [] };
 
-    // Try to nest: tool/llm under agent, agent under invocation
-    if (baseType === "tool" || baseType === "llm") {
+    // Try to nest: tool.data under its matching tool node, tool/llm under agent, agent under invocation
+    if (span.span_type === "tool.data") {
+      const toolName = span.tool_name || span.data?.tool_name || "";
+      const toolParent = toolName ? findLastToolByName(nodes, toolName) : null;
+      if (toolParent) {
+        toolParent.children.push(node);
+      } else {
+        nodes.push(node);
+      }
+    } else if (baseType === "tool" || baseType === "llm") {
       // Find the last agent node to nest under
       const agentParent = findLastNodeOfType(nodes, "agent");
       if (agentParent) {
@@ -192,6 +222,21 @@ function findLastNodeOfType(nodes: SpanNode[], baseType: string): SpanNode | nul
     if (nodes[i].span.span_type.startsWith(baseType)) return nodes[i];
     // Check children
     const found = findLastNodeOfType(nodes[i].children, baseType);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findLastToolByName(nodes: SpanNode[], toolName: string): SpanNode | null {
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const s = nodes[i].span;
+    if (
+      (s.span_type === "tool.end" || s.span_type === "tool.start") &&
+      (s.tool_name || s.data?.tool_name || "") === toolName
+    ) {
+      return nodes[i];
+    }
+    const found = findLastToolByName(nodes[i].children, toolName);
     if (found) return found;
   }
   return null;
@@ -420,12 +465,13 @@ type ViewMode = "tree" | "flow";
 
 interface FlowStep {
   id: string;
-  type: "user" | "llm" | "tool" | "agent" | "response" | "event";
+  type: "user" | "llm" | "tool" | "agent" | "response" | "event" | "session";
   label: string;
   sublabel: string;
   duration_ms: number | null;
   error: string;
   span: Span;
+  dataSpan?: Span;
 }
 
 function extractFlowSteps(spans: Span[]): FlowStep[] {
@@ -442,6 +488,7 @@ function extractFlowSteps(spans: Span[]): FlowStep[] {
     const isStart = span.span_type.endsWith(".start");
 
     if (isEnd && span.span_id && merged.has(span.span_id)) {
+      // Merge into the matching .start span
       const start = merged.get(span.span_id)!;
       if (span.duration_ms != null) start.duration_ms = span.duration_ms;
       if (span.error) start.error = span.error;
@@ -450,14 +497,58 @@ function extractFlowSteps(spans: Span[]): FlowStep[] {
 
     if (isStart && span.span_id) {
       merged.set(span.span_id, { ...span });
-    } else if (!isEnd) {
+    } else if (isEnd) {
+      // Orphaned .end with no matching .start — treat as standalone
+      standalone.push(span);
+    } else {
       standalone.push(span);
     }
   }
 
-  const allSpans = [...merged.values(), ...standalone].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  );
+  // Match tool.data spans to their tool.end/tool.start by tool_name.
+  const combined = [...merged.values(), ...standalone];
+  const toolDataSpans: Span[] = [];
+  const nonToolData: Span[] = [];
+  for (const s of combined) {
+    if (s.span_type === "tool.data") {
+      toolDataSpans.push(s);
+    } else {
+      nonToolData.push(s);
+    }
+  }
+  // Map parent span id → tool.data span
+  const toolDataMap = new Map<string, Span>();
+  const claimedTools = new Set<string>();
+  for (const td of toolDataSpans) {
+    const toolName = td.tool_name || td.data?.tool_name || "";
+    const parent = toolName
+      ? nonToolData.find(
+          (s) =>
+            !claimedTools.has(s.id) &&
+            (s.span_type === "tool.end" || s.span_type === "tool.start") &&
+            (s.tool_name || s.data?.tool_name || "") === toolName
+        )
+      : null;
+    if (parent) {
+      claimedTools.add(parent.id);
+      toolDataMap.set(parent.id, td);
+    } else {
+      // No match — show as its own step
+      nonToolData.push(td);
+    }
+  }
+
+  // Pin session.start to top, agent.end to bottom, sort the rest by created_at
+  const sessionStarts: Span[] = [];
+  const agentEnds: Span[] = [];
+  const rest: Span[] = [];
+  for (const s of nonToolData) {
+    if (s.span_type === "session.start") sessionStarts.push(s);
+    else if (s.span_type === "agent.end") agentEnds.push(s);
+    else rest.push(s);
+  }
+  rest.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  const allSpans = [...sessionStarts, ...rest, ...agentEnds];
 
   const steps: FlowStep[] = [];
 
@@ -484,15 +575,16 @@ function extractFlowSteps(spans: Span[]): FlowStep[] {
         error: span.error,
         span,
       });
-    } else if (baseType === "tool") {
+    } else if (baseType === "tool" || baseType === "tool.data") {
       steps.push({
         id: span.id,
         type: "tool",
         label: span.tool_name || "Tool",
-        sublabel: span.data?.tool_type || "tool call",
+        sublabel: baseType === "tool.data" ? "tool data" : (span.data?.tool_type || "tool call"),
         duration_ms: span.duration_ms,
         error: span.error,
         span,
+        dataSpan: toolDataMap.get(span.id),
       });
     } else if (baseType === "agent") {
       steps.push({
@@ -515,7 +607,17 @@ function extractFlowSteps(spans: Span[]): FlowStep[] {
         span,
       });
     }
-    // Skip session-level spans in the flow
+    else if (baseType === "session") {
+      steps.push({
+        id: span.id,
+        type: "session",
+        label: "Session Start",
+        sublabel: span.agent_name || "session input",
+        duration_ms: span.duration_ms,
+        error: span.error,
+        span,
+      });
+    }
   }
 
   return steps;
@@ -560,6 +662,12 @@ const FLOW_STEP_CONFIG: Record<
     bg: "bg-gray-50",
     border: "border-gray-200",
     text: "text-gray-600",
+  },
+  session: {
+    icon: <ActivityIcon size={16} />,
+    bg: "bg-teal-50",
+    border: "border-teal-200",
+    text: "text-teal-700",
   },
 };
 
@@ -644,6 +752,35 @@ export const SummaryFlowView: React.FC<{
                   )}
                 </div>
               </button>
+
+              {/* Attached tool.data sub-step */}
+              {step.dataSpan && (
+                <>
+                  <div className="flex flex-col items-center">
+                    <div className="w-px h-2 bg-gray-400" />
+                  </div>
+                  <button
+                    onClick={() => onSelectSpan(step.dataSpan!)}
+                    className={`
+                      w-full flex items-center gap-3 px-4 py-2 rounded-md border border-dashed transition-all
+                      text-left cursor-pointer
+                      ${selectedSpanId === step.dataSpan.id
+                        ? "border-accent-400 ring-2 ring-accent-100 shadow-sm bg-gray-100"
+                        : "border-gray-400 hover:shadow-sm hover:border-gray-500 bg-gray-100"
+                      }
+                    `}
+                  >
+                    <div className="flex-shrink-0 w-6 h-6 rounded flex items-center justify-center text-gray-600 bg-white border border-gray-300">
+                      <WrenchIcon size={12} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium text-gray-700">
+                        {step.dataSpan.tool_name || "Tool"} data
+                      </div>
+                    </div>
+                  </button>
+                </>
+              )}
             </React.Fragment>
           );
         })}
@@ -683,15 +820,18 @@ export const ObservabilitySessionDetail: React.FC<{ sessionId: string }> = ({
   const [selectedSpan, setSelectedSpan] = useState<Span | null>(null);
   const [typeFilter, setTypeFilter] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("flow");
+  const [evalRows, setEvalRows] = useState<EvalRow[]>([]);
+  const [sessionSkills, setSessionSkills] = useState<SkillRef[]>([]);
   const initialLoadDone = useRef(false);
 
   const fetchData = useCallback(async () => {
     if (!initialLoadDone.current) setLoading(true);
     try {
       const sourceParam = `source=${dataSource}`;
-      const [sessResp, spansResp] = await Promise.all([
+      const [sessResp, spansResp, evalResp] = await Promise.all([
         apiFetch(`/api/agent-sessions/${sessionId}?${sourceParam}`),
         apiFetch(`/api/agent-sessions/${sessionId}/spans?${sourceParam}&limit=2000`),
+        apiFetch(`/api/eval-uploads/explorer`).catch(() => null),
       ]);
 
       if (sessResp.ok) {
@@ -708,6 +848,43 @@ export const ObservabilitySessionDetail: React.FC<{ sessionId: string }> = ({
           setSpans(data);
           setTotalSpans(data.length);
         }
+      }
+      if (evalResp?.ok) {
+        const allRows = await evalResp.json();
+        setEvalRows(
+          allRows
+            .filter((r: any) => r.session_id === sessionId)
+            .map((r: any) => ({
+              id: r.id,
+              ground_truth: r.ground_truth || "",
+              rating: r.rating || "",
+              trajectory_alignment: r.trajectory_alignment || "",
+              task_success: r.task_success || "",
+              tags: r.tags || "",
+              reference_trajectory: r.reference_trajectory || "",
+              reference_state: r.reference_state || "",
+              reference_answer: r.reference_answer || "",
+              upload_id: r.upload_id || "",
+            }))
+        );
+      }
+      // Fetch skills distilled from this session
+      try {
+        const skillsResp = await apiFetch(`/api/skills?session_id=${sessionId}`);
+        if (skillsResp.ok) {
+          const skills = await skillsResp.json();
+          setSessionSkills(
+            skills.map((s: any) => ({
+              id: s.id,
+              title: s.title,
+              category: s.category,
+              reward_delta: s.reward_delta || 0,
+              confidence: s.confidence || 0,
+            }))
+          );
+        }
+      } catch {
+        // ignore
       }
     } catch {
       // ignore
@@ -778,7 +955,7 @@ export const ObservabilitySessionDetail: React.FC<{ sessionId: string }> = ({
       {/* Header */}
       <div className="flex items-center gap-3 px-6 py-3 border-b border-gray-200 bg-white flex-shrink-0">
         <button
-          onClick={() => router.push(`/observability`)}
+          onClick={() => router.back()}
           className="p-1 hover:bg-gray-100 rounded-md transition-colors"
         >
           <ArrowBackIcon size={18} className="text-gray-500" />
@@ -886,6 +1063,120 @@ export const ObservabilitySessionDetail: React.FC<{ sessionId: string }> = ({
         {selectedSpan && (
           <div className="w-[380px] flex-shrink-0 bg-white overflow-hidden border-l border-gray-200">
             <SpanDetailPanel span={selectedSpan} />
+          </div>
+        )}
+
+        {/* Eval + Skills panel */}
+        {(evalRows.length > 0 || sessionSkills.length > 0) && (
+          <div className="w-[320px] flex-shrink-0 border-l border-gray-200 bg-white overflow-auto">
+            <div className="p-4">
+              {/* Distilled skills section */}
+              {sessionSkills.length > 0 && (
+                <div className="mb-5">
+                  <h2 className="text-xs font-semibold text-gray-900 uppercase tracking-wide mb-3">Distilled Skills</h2>
+                  <div className="space-y-2">
+                    {sessionSkills.map((skill) => (
+                      <button
+                        key={skill.id}
+                        onClick={() => router.push(`/skills/${skill.id}`)}
+                        className="w-full text-left px-3 py-2.5 rounded-lg border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all"
+                      >
+                        <div className="text-sm font-medium text-gray-900 mb-1">{skill.title}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] px-1.5 py-0.5 bg-violet-50 text-violet-700 rounded font-medium">
+                            {skill.category}
+                          </span>
+                          <span className={`text-[10px] font-semibold ${skill.reward_delta >= 0 ? "text-green-600" : "text-red-600"}`}>
+                            {skill.reward_delta >= 0 ? "+" : ""}{(skill.reward_delta * 100).toFixed(0)}%
+                          </span>
+                          <span className="text-[10px] text-gray-400">
+                            conf {(skill.confidence * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {evalRows.length > 0 && (
+              <>
+              <h2 className="text-xs font-semibold text-gray-900 uppercase tracking-wide mb-3">Ground Truth</h2>
+              <div className="space-y-3">
+                {evalRows.map((row) => (
+                  <div key={row.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="p-3">
+                      <div className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
+                        {row.ground_truth}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {row.rating && (
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200">
+                            <span className="text-[11px] text-amber-600 font-medium">Rating:</span>
+                            <span className="text-xs font-semibold text-amber-700">{row.rating}</span>
+                          </span>
+                        )}
+                        {row.trajectory_alignment && (
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200">
+                            <span className="text-[11px] text-blue-600 font-medium">Alignment:</span>
+                            <span className="text-xs font-semibold text-blue-700">{row.trajectory_alignment}</span>
+                          </span>
+                        )}
+                        {row.task_success && (
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${row.task_success === "true" ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
+                            <span className={`text-[11px] font-medium ${row.task_success === "true" ? "text-green-600" : "text-red-600"}`}>Task:</span>
+                            <span className={`text-xs font-semibold ${row.task_success === "true" ? "text-green-700" : "text-red-700"}`}>{row.task_success}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {(row.reference_trajectory || row.reference_state || row.reference_answer) && (
+                      <div className="px-3 pb-3 space-y-2">
+                        {row.reference_trajectory && (
+                          <div>
+                            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Ref Trajectory</div>
+                            <div className="text-xs text-gray-700 whitespace-pre-wrap break-words bg-gray-50 rounded p-2 border border-gray-100">
+                              {row.reference_trajectory}
+                            </div>
+                          </div>
+                        )}
+                        {row.reference_state && (
+                          <div>
+                            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Ref State</div>
+                            <div className="text-xs text-gray-700 whitespace-pre-wrap break-words bg-gray-50 rounded p-2 border border-gray-100">
+                              {row.reference_state}
+                            </div>
+                          </div>
+                        )}
+                        {row.reference_answer && (
+                          <div>
+                            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Ref Answer</div>
+                            <div className="text-xs text-gray-700 whitespace-pre-wrap break-words bg-gray-50 rounded p-2 border border-gray-100">
+                              {row.reference_answer}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {row.tags && (
+                      <div className="px-3 py-2 bg-gray-50 border-t border-gray-100">
+                        <div className="flex flex-wrap gap-1">
+                          {row.tags.split(";").map((tag, i) => (
+                            <span key={i} className="inline-block px-1.5 py-0.5 text-[11px] bg-white border border-gray-200 text-gray-600 rounded">
+                              {tag.trim()}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              </>
+              )}
+            </div>
           </div>
         )}
       </div>

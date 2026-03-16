@@ -1,6 +1,6 @@
 """Pydantic models for API request/response validation."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel
@@ -324,6 +324,7 @@ class AgentSessionResponse(BaseModel):
     metadata: dict[str, Any] | None = None
     created_at: datetime
     completed_at: datetime | None = None
+    span_count: int | None = None
 
 
 class AgentTrajectoryIngest(BaseModel):
@@ -421,6 +422,15 @@ class DashboardResponse(BaseModel):
     sessions: SessionCounts
 
 
+class SpanActivityBucket(BaseModel):
+    day: date
+    count: int
+
+
+class SpanActivityResponse(BaseModel):
+    buckets: list[SpanActivityBucket]
+
+
 # Skill distillation models
 class SkillCreate(BaseModel):
     title: str
@@ -489,6 +499,11 @@ class SpanUploadResponse(BaseModel):
     created_at: datetime
 
 
+class SpanUploadListResponse(BaseModel):
+    uploads: list[SpanUploadResponse]
+    total: int
+
+
 class SpanUploadSessionResponse(BaseModel):
     id: str
     name: str
@@ -496,6 +511,11 @@ class SpanUploadSessionResponse(BaseModel):
     span_count: int
     created_at: datetime
     completed_at: datetime | None = None
+
+
+class SpanUploadSessionListResponse(BaseModel):
+    sessions: list[SpanUploadSessionResponse]
+    total: int
 
 
 # Eval explorer models (joined eval rows + session metadata)
@@ -514,7 +534,13 @@ class EvalExplorerRow(BaseModel):
     upload_id: str
     session_id: str
     ground_truth: str
+    rating: str = ""
+    trajectory_alignment: str = ""
+    task_success: str = ""
     tags: str
+    reference_trajectory: str = ""
+    reference_state: str = ""
+    reference_answer: str = ""
     created_at: datetime
     session: EvalExplorerSessionInfo | None = None
 
@@ -533,5 +559,49 @@ class EvalUploadRowResponse(BaseModel):
     session_id: str
     agent_trajectory: str
     ground_truth: str
+    rating: str = ""
+    trajectory_alignment: str = ""
+    task_success: str = ""
     tags: str
+    reference_trajectory: str = ""
+    reference_state: str = ""
+    reference_answer: str = ""
     created_at: datetime
+
+
+# Background job models
+class BackgroundJobResponse(BaseModel):
+    id: str
+    job_type: str
+    status: str
+    progress: dict[str, Any] = {}
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+# Cluster models
+class ClusterResponse(BaseModel):
+    id: str
+    name: str
+    task_type: str
+    description: str = ""
+    member_count: int = 0
+    metadata: dict[str, Any] = {}
+    job_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ClusterMemberResponse(BaseModel):
+    id: str
+    cluster_id: str
+    session_id: str
+    labels: dict[str, Any] = {}
+    summary: str = ""
+    created_at: datetime
+
+
+class ClusterDetailResponse(ClusterResponse):
+    members: list[ClusterMemberResponse] = []

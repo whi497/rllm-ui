@@ -20,7 +20,7 @@ logging.basicConfig(
 from datastore.factory import get_datastore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, agent, agent_sessions, auth, episodes, eval_results, eval_uploads, health, logs, metrics, oauth, sessions, settings, skills, span_uploads, sse, trajectory_groups
+from routers import admin, agent, agent_sessions, auth, clusters, episodes, eval_results, eval_uploads, health, jobs, logs, metrics, oauth, sessions, settings, skills, span_uploads, sse, trajectory_groups
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +43,8 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Database connection attempt {attempt}/{max_retries} failed: {e}. Retrying in 3s...")
             time.sleep(3)
 
-    # Initialize global agent (local mode only — cloud mode uses per-user keys)
-    from auth import IS_CLOUD
-
-    if IS_CLOUD:
-        logger.info("Cloud mode: skipping global agent init (per-user keys only)")
-        app.state.agent = None
-    elif os.environ.get("ANTHROPIC_API_KEY"):
+    # Initialize global agent from ANTHROPIC_API_KEY (per-user keys take priority at request time)
+    if os.environ.get("ANTHROPIC_API_KEY"):
         try:
             from agent import ObservabilityAgent
 
@@ -108,6 +103,12 @@ async def lifespan(app: FastAPI):
         app.state.bigquery = None
         logger.info("BQ_PROJECT not set, BigQuery trace features disabled")
 
+    # Initialize job manager
+    from jobs import JobManager
+
+    app.state.job_manager = JobManager(app.state.store)
+    app.state.job_manager.cleanup_dangling_jobs()
+
     # Start background crash detection loop
     async def crash_detection_loop():
         while True:
@@ -124,6 +125,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    app.state.job_manager.cancel_all()
     crash_task.cancel()
     app.state.store.close()
     if getattr(app.state, "postgres_spans", None):
@@ -180,4 +182,6 @@ app.include_router(eval_uploads.router)
 app.include_router(span_uploads.router)
 app.include_router(skills.router)
 app.include_router(agent_sessions.router)
+app.include_router(jobs.router)
+app.include_router(clusters.router)
 app.include_router(admin.router)

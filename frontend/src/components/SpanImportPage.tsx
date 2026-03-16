@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   UploadIcon,
   DeleteIcon,
@@ -39,8 +39,12 @@ function formatDate(iso: string): string {
   );
 }
 
+const PAGE_SIZE = 20;
+
 export const SpanImportPage: React.FC = () => {
   const [uploads, setUploads] = useState<SpanUpload[]>([]);
+  const [totalUploads, setTotalUploads] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -49,6 +53,8 @@ export const SpanImportPage: React.FC = () => {
   // Inspect state
   const [inspectUploadId, setInspectUploadId] = useState<string | null>(null);
   const [inspectSessions, setInspectSessions] = useState<SpanUploadSession[]>([]);
+  const [inspectTotal, setInspectTotal] = useState(0);
+  const [inspectPage, setInspectPage] = useState(0);
   const [inspectLoading, setInspectLoading] = useState(false);
 
   // Delete confirmation
@@ -61,9 +67,12 @@ export const SpanImportPage: React.FC = () => {
   const fetchUploads = useCallback(async () => {
     if (!initialLoadDone.current) setLoading(true);
     try {
-      const resp = await apiFetch("/api/span-uploads");
+      const offset = page * PAGE_SIZE;
+      const resp = await apiFetch(`/api/span-uploads?limit=${PAGE_SIZE}&offset=${offset}`);
       if (resp.ok) {
-        setUploads(await resp.json());
+        const data = await resp.json();
+        setUploads(data.uploads);
+        setTotalUploads(data.total);
       }
     } catch {
       // ignore
@@ -71,9 +80,14 @@ export const SpanImportPage: React.FC = () => {
       setLoading(false);
       initialLoadDone.current = true;
     }
-  }, []);
+  }, [page]);
 
   usePolling(fetchUploads, { interval: 60000 });
+
+  // Re-fetch immediately when page changes
+  useEffect(() => {
+    fetchUploads();
+  }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -100,6 +114,7 @@ export const SpanImportPage: React.FC = () => {
         setUploadSuccess(
           `Uploaded "${result.filename}" — ${result.row_count} spans across ${result.session_count} session(s)`
         );
+        setPage(0);
         fetchUploads();
       }
     } catch {
@@ -110,22 +125,39 @@ export const SpanImportPage: React.FC = () => {
     }
   };
 
+  const fetchInspectSessions = useCallback(async (uploadId: string, pg: number) => {
+    setInspectLoading(true);
+    try {
+      const offset = pg * PAGE_SIZE;
+      const resp = await apiFetch(
+        `/api/span-uploads/${encodeURIComponent(uploadId)}/sessions?limit=${PAGE_SIZE}&offset=${offset}`
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        setInspectSessions(data.sessions);
+        setInspectTotal(data.total);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setInspectLoading(false);
+    }
+  }, []);
+
   const handleInspect = async (uploadId: string) => {
     if (inspectUploadId === uploadId) {
       setInspectUploadId(null);
       return;
     }
     setInspectUploadId(uploadId);
-    setInspectLoading(true);
-    try {
-      const resp = await apiFetch(`/api/span-uploads/${encodeURIComponent(uploadId)}/sessions`);
-      if (resp.ok) {
-        setInspectSessions(await resp.json());
-      }
-    } catch {
-      // ignore
-    } finally {
-      setInspectLoading(false);
+    setInspectPage(0);
+    fetchInspectSessions(uploadId, 0);
+  };
+
+  const handleInspectPageChange = (newPage: number) => {
+    setInspectPage(newPage);
+    if (inspectUploadId) {
+      fetchInspectSessions(inspectUploadId, newPage);
     }
   };
 
@@ -226,7 +258,7 @@ export const SpanImportPage: React.FC = () => {
         <div>
           <h2 className="text-sm font-medium text-gray-700 mb-3">
             Past Uploads
-            <span className="ml-2 text-gray-400 font-normal">{uploads.length}</span>
+            <span className="ml-2 text-gray-400 font-normal">{totalUploads}</span>
           </h2>
 
           {uploads.length === 0 ? (
@@ -302,7 +334,11 @@ export const SpanImportPage: React.FC = () => {
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                               {inspectSessions.map((session) => (
-                                <tr key={session.id} className="text-gray-700">
+                                <tr
+                                  key={session.id}
+                                  className="text-gray-700 hover:bg-gray-100 cursor-pointer transition-colors"
+                                  onClick={() => window.location.assign(`/observability/${encodeURIComponent(session.id)}?source=postgres`)}
+                                >
                                   <td className="py-1.5 pr-3 font-mono text-xs max-w-[200px] truncate">
                                     {session.id}
                                   </td>
@@ -320,12 +356,61 @@ export const SpanImportPage: React.FC = () => {
                               ))}
                             </tbody>
                           </table>
+                          {/* Session pagination */}
+                          {inspectTotal > PAGE_SIZE && (
+                            <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
+                              <span className="text-xs text-gray-400">
+                                {inspectPage * PAGE_SIZE + 1}–{Math.min((inspectPage + 1) * PAGE_SIZE, inspectTotal)} of {inspectTotal} sessions
+                              </span>
+                              <div className="flex gap-1.5">
+                                <button
+                                  onClick={() => handleInspectPageChange(inspectPage - 1)}
+                                  disabled={inspectPage === 0}
+                                  className="px-2 py-0.5 text-xs text-gray-600 bg-white border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  Previous
+                                </button>
+                                <button
+                                  onClick={() => handleInspectPageChange(inspectPage + 1)}
+                                  disabled={(inspectPage + 1) * PAGE_SIZE >= inspectTotal}
+                                  className="px-2 py-0.5 text-xs text-gray-600 bg-white border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  Next
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Pagination controls */}
+          {totalUploads > PAGE_SIZE && (
+            <div className="flex items-center justify-between mt-3">
+              <span className="text-xs text-gray-400">
+                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalUploads)} of {totalUploads}
+              </span>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                  className="px-2.5 py-1 text-xs text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={(page + 1) * PAGE_SIZE >= totalUploads}
+                  className="px-2.5 py-1 text-xs text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           )}
         </div>

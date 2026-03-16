@@ -151,6 +151,7 @@ class BigQueryClient:
         self,
         limit: int = 50,
         offset: int = 0,
+        user_id: str | None = None,  # TODO: filter by user_id when BQ is migrated
     ) -> list[dict[str, Any]]:
         """Return sessions derived from spans, most recent first.
 
@@ -179,13 +180,13 @@ class BigQueryClient:
         ])
         return [self._to_session_dict(r) for r in rows]
 
-    def count_agent_sessions(self) -> int:
+    def count_agent_sessions(self, user_id: str | None = None) -> int:
         """Return the total number of distinct sessions."""
         sql = f"SELECT COUNT(DISTINCT session_id) AS cnt FROM {self._fqn}"
         row = self._run_one(sql)
         return row["cnt"] if row else 0
 
-    def get_agent_session(self, session_id: str) -> dict[str, Any] | None:
+    def get_agent_session(self, session_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         """Return a single session (derived from its spans)."""
         sql = f"""
             SELECT
@@ -308,7 +309,7 @@ class BigQueryClient:
     # Dashboard aggregates
     # ------------------------------------------------------------------
 
-    def get_dashboard_stats(self, days: int = 7) -> dict[str, Any]:
+    def get_dashboard_stats(self, days: int = 7, user_id: str | None = None) -> dict[str, Any]:
         """Aggregate statistics across all spans within the time window."""
         sql = f"""
             SELECT
@@ -343,7 +344,7 @@ class BigQueryClient:
             }
         return {k: _nvl(v) for k, v in row.items()}
 
-    def get_span_timeseries(self, days: int = 7) -> list[dict[str, Any]]:
+    def get_span_timeseries(self, days: int = 7, user_id: str | None = None) -> list[dict[str, Any]]:
         """Time-bucketed span counts for charting."""
         sql = f"""
             SELECT
@@ -372,6 +373,7 @@ class BigQueryClient:
         self,
         days: int = 7,
         limit: int = 10,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Most-used models with token counts."""
         sql = f"""
@@ -404,6 +406,7 @@ class BigQueryClient:
         self,
         days: int = 7,
         limit: int = 10,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Most-used tools with counts and latency."""
         sql = f"""
@@ -430,7 +433,7 @@ class BigQueryClient:
                     row[k] = 0
         return rows
 
-    def get_session_count(self, days: int = 7) -> dict[str, int]:
+    def get_session_count(self, days: int = 7, user_id: str | None = None) -> dict[str, int]:
         """Session counts within the time window.
 
         All BigQuery sessions are treated as ``completed`` since the data
@@ -452,11 +455,20 @@ class BigQueryClient:
             "failed": 0,
         }
 
+    def get_span_activity(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        """Daily span counts over the full stored time range."""
+        sql = f"""
+            SELECT DATE(ingested_at) AS day, COUNT(*) AS count
+            FROM {self._fqn}
+            GROUP BY day ORDER BY day
+        """
+        return self._run(sql, [])
+
     # ------------------------------------------------------------------
     # Batch validation
     # ------------------------------------------------------------------
 
-    def check_session_ids_exist(self, session_ids: list[str]) -> set[str]:
+    def check_session_ids_exist(self, session_ids: list[str], user_id: str | None = None) -> set[str]:
         """Return the subset of session_ids that exist in spans."""
         if not session_ids:
             return set()
@@ -473,6 +485,14 @@ class BigQueryClient:
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
+    def delete_all(self) -> dict[str, int]:
+        """Delete all rows from the traces table. Returns count of deleted rows."""
+        count_row = self._run_one(f"SELECT COUNT(*) AS cnt FROM {self._fqn}")
+        count = count_row["cnt"] if count_row else 0
+        # BigQuery DML DELETE requires a WHERE clause
+        self.client.query(f"DELETE FROM {self._fqn} WHERE TRUE").result()
+        return {"traces": count}
 
     def close(self) -> None:
         """Close the underlying BigQuery client transport."""

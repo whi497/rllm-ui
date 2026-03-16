@@ -20,6 +20,7 @@ import {
   SparklesIcon,
   UploadIcon,
   DatabaseIcon,
+  LayersIcon,
 } from "./icons";
 import { ActionMenu } from "./ActionMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -64,6 +65,7 @@ export const Sidebar: React.FC = () => {
   const isSettingsActive = pathname === "/settings";
   const isEvaluationActive = pathname.startsWith("/evaluation");
   const isObservabilityActive = pathname.startsWith("/observability");
+  const isClustersActive = pathname.startsWith("/clusters");
   const isSkillsActive = pathname.startsWith("/skills");
   const isSpanImportActive = pathname.startsWith("/span-import");
   const isEvalInputActive = pathname.startsWith("/eval-input");
@@ -127,7 +129,7 @@ export const Sidebar: React.FC = () => {
 
   // Auto-collapse main sidebar when navigating away from home (project overview, run, or settings)
   useEffect(() => {
-    if (projectOverviewMatch || activeSessionId || isSettingsActive || isEvaluationActive || isObservabilityActive || isSkillsActive || isSpanImportActive || isEvalInputActive || isAdminActive) {
+    if (projectOverviewMatch || activeSessionId || isSettingsActive || isEvaluationActive || isObservabilityActive || isClustersActive || isSkillsActive || isSpanImportActive || isEvalInputActive || isAdminActive) {
       setIsCollapsed(true);
     } else {
       setIsCollapsed(false);
@@ -276,6 +278,23 @@ export const Sidebar: React.FC = () => {
             )}
           </Link>
           <Link
+            href="/clusters"
+            className={`
+              flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
+              transition-colors duration-150
+              ${isCollapsed ? "justify-center" : ""}
+              ${
+                isClustersActive
+                  ? "bg-accent-50 text-accent-700"
+                  : "text-gray-600 hover:bg-layer-1 hover:text-gray-900"
+              }
+            `}
+            title={isCollapsed ? "Clusters" : undefined}
+          >
+            <LayersIcon size={18} className="flex-shrink-0" />
+            {!isCollapsed && <span>Clusters</span>}
+          </Link>
+          <Link
             href="/skills"
             className={`
               flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
@@ -416,23 +435,28 @@ export const Sidebar: React.FC = () => {
 /* ─── User Menu (cloud mode only) ──────────────────────────────────── */
 
 const UserMenu: React.FC<{ isCollapsed: boolean }> = ({ isCollapsed }) => {
-  const { config, user } = useAuth();
+  const { config, user, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useClickOutside(menuRef, () => setOpen(false));
 
   if (!config?.auth_required || !user) return null;
 
   const initials = (user.name || user.email)[0].toUpperCase();
 
   return (
-    <div className="px-2 pb-2">
-      <div
-        className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm text-gray-600 ${isCollapsed ? "justify-center" : ""}`}
+    <div className="px-2 pb-2 relative" ref={menuRef}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition-colors ${isCollapsed ? "justify-center" : ""}`}
         title={isCollapsed ? user.email : undefined}
       >
         <span className="w-6 h-6 rounded-full bg-accent-100 text-accent-700 flex items-center justify-center text-xs font-medium flex-shrink-0">
           {initials}
         </span>
         {!isCollapsed && (
-          <div className="flex flex-col min-w-0">
+          <div className="flex flex-col min-w-0 text-left">
             <span className="truncate text-xs">{user.email}</span>
             {user.team && (
               <span className="inline-flex items-center gap-1 mt-0.5">
@@ -442,7 +466,17 @@ const UserMenu: React.FC<{ isCollapsed: boolean }> = ({ isCollapsed }) => {
             )}
           </div>
         )}
-      </div>
+      </button>
+      {open && (
+        <div className={`absolute ${isCollapsed ? "left-12" : "left-2 right-2"} bottom-full mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50`}>
+          <button
+            onClick={() => { setOpen(false); logout(); }}
+            className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            Log out
+          </button>
+        </div>
+      )}
     </div>
   );
 };

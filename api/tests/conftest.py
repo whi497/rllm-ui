@@ -12,9 +12,15 @@ from datastore.sqlite_store import SQLiteStore  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from main import app  # noqa: E402
 
-# Patch the already-computed module-level flag so auth dependency skips checks.
-auth.DEPLOYMENT_MODE = "local"
-auth.IS_CLOUD = False
+# Override auth dependency to return a fake user for all test requests.
+_TEST_USER = {"id": "test-user", "email": "test@localhost", "name": "Test User", "api_key": "rllm_test"}
+
+
+async def _mock_get_current_user():
+    return _TEST_USER
+
+
+app.dependency_overrides[auth.get_current_user] = _mock_get_current_user
 
 
 @pytest.fixture

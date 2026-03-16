@@ -191,9 +191,10 @@ export const SkillsPage: React.FC = () => {
     setDistillError("");
     setSelectedSessions(new Set());
     try {
-      const resp = await apiFetch("/api/agent-sessions");
+      const resp = await apiFetch("/api/agent-sessions?source=postgres&limit=200");
       if (resp.ok) {
-        const data: AgentSession[] = await resp.json();
+        const raw = await resp.json();
+        const data: AgentSession[] = raw.items || raw;
         setAgentSessions(data);
       }
     } catch {
@@ -209,7 +210,7 @@ export const SkillsPage: React.FC = () => {
       const resp = await apiFetch("/api/skills/distill", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_ids: Array.from(selectedSessions) }),
+        body: JSON.stringify({ session_ids: Array.from(selectedSessions), source: "postgres" }),
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));

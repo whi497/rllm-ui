@@ -44,7 +44,7 @@ export const LoginPage: React.FC = () => {
     if (result) {
       setError(result);
     } else {
-      router.push("/");
+      router.push("/observability");
     }
   };
 

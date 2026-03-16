@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -24,12 +25,26 @@ logger = logging.getLogger(__name__)
 class PostgresSpanClient:
     """Postgres-backed span client — mirrors the ClickHouse/BigQuery client interface."""
 
-    def __init__(self, url: str, minconn: int = 1, maxconn: int = 3) -> None:
+    def __init__(self, url: str, minconn: int = 2, maxconn: int = 10) -> None:
         self._pool = ThreadedConnectionPool(
             minconn, maxconn, url,
             cursor_factory=RealDictCursor,
             connect_timeout=5,
         )
+        self._ensure_indexes()
+
+    def _ensure_indexes(self) -> None:
+        """Create indexes if they don't exist (idempotent)."""
+        try:
+            with self._get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_imported_sessions_created_at "
+                        "ON imported_agent_sessions(created_at DESC)"
+                    )
+                conn.commit()
+        except Exception:
+            logger.debug("Could not ensure indexes (table may not exist yet)", exc_info=True)
 
     @contextmanager
     def _get_conn(self):
@@ -52,15 +67,16 @@ class PostgresSpanClient:
         upload_id: str,
         filename: str,
         sessions: dict[str, list[dict[str, Any]]],
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         """Store a span CSV upload: create upload metadata, sessions, and spans in a transaction."""
         total_rows = sum(len(spans) for spans in sessions.values())
         with self._get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO span_uploads (upload_id, filename, row_count, session_count) "
-                    "VALUES (%s, %s, %s, %s) RETURNING *",
-                    (upload_id, filename, total_rows, len(sessions)),
+                    "INSERT INTO span_uploads (upload_id, filename, row_count, session_count, user_id) "
+                    "VALUES (%s, %s, %s, %s, %s) RETURNING *",
+                    (upload_id, filename, total_rows, len(sessions), user_id),
                 )
                 upload = dict(cur.fetchone())
 
@@ -73,9 +89,9 @@ class PostgresSpanClient:
                     completed_at = datetime.fromtimestamp(max(ended_ats), tz=timezone.utc) if ended_ats else None
 
                     cur.execute(
-                        "INSERT INTO imported_agent_sessions (id, name, status, upload_id, created_at, completed_at) "
-                        "VALUES (%s, %s, %s, %s, %s, %s)",
-                        (session_id, session_name, "completed", upload_id, created_at, completed_at),
+                        "INSERT INTO imported_agent_sessions (id, name, status, upload_id, created_at, completed_at, user_id) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        (session_id, session_name, "completed", upload_id, created_at, completed_at, user_id),
                     )
 
                     for span in spans:
@@ -138,58 +154,169 @@ class PostgresSpanClient:
                 conn.commit()
                 return upload
 
-    def get_span_uploads(self) -> list[dict[str, Any]]:
+    def get_span_uploads(self, limit: int = 0, offset: int = 0, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM span_uploads ORDER BY created_at DESC")
+                where = "WHERE user_id = %s " if user_id else ""
+                params: list = [user_id] if user_id else []
+                if limit > 0:
+                    cur.execute(
+                        f"SELECT * FROM span_uploads {where}ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                        (*params, limit, offset),
+                    )
+                else:
+                    cur.execute(f"SELECT * FROM span_uploads {where}ORDER BY created_at DESC", params)
                 return [dict(row) for row in cur.fetchall()]
 
-    def get_span_upload_sessions(self, upload_id: str) -> list[dict[str, Any]] | None:
-        """Return sessions for an upload, or None if upload doesn't exist."""
+    def count_span_uploads(self, user_id: str | None = None) -> int:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT upload_id FROM span_uploads WHERE upload_id = %s", (upload_id,))
+                if user_id:
+                    cur.execute("SELECT count(*) AS cnt FROM span_uploads WHERE user_id = %s", (user_id,))
+                else:
+                    cur.execute("SELECT count(*) AS cnt FROM span_uploads")
+                return cur.fetchone()["cnt"]
+
+    def get_span_upload_sessions(
+        self, upload_id: str, limit: int = 0, offset: int = 0, user_id: str | None = None,
+    ) -> list[dict[str, Any]] | None:
+        """Return sessions for an upload, or None if upload doesn't exist (or doesn't belong to user)."""
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                if user_id:
+                    cur.execute("SELECT upload_id FROM span_uploads WHERE upload_id = %s AND user_id = %s", (upload_id, user_id))
+                else:
+                    cur.execute("SELECT upload_id FROM span_uploads WHERE upload_id = %s", (upload_id,))
                 if not cur.fetchone():
                     return None
-                cur.execute(
+                query = (
                     "SELECT s.*, "
                     "(SELECT count(*) FROM imported_agent_spans sp WHERE sp.agent_session_id = s.id) AS span_count "
-                    "FROM imported_agent_sessions s WHERE s.upload_id = %s ORDER BY s.created_at",
-                    (upload_id,),
+                    "FROM imported_agent_sessions s WHERE s.upload_id = %s ORDER BY s.created_at"
                 )
+                if limit > 0:
+                    query += " LIMIT %s OFFSET %s"
+                    cur.execute(query, (upload_id, limit, offset))
+                else:
+                    cur.execute(query, (upload_id,))
                 return [dict(row) for row in cur.fetchall()]
 
-    def delete_span_upload(self, upload_id: str) -> bool:
+    def count_span_upload_sessions(self, upload_id: str) -> int:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM span_uploads WHERE upload_id = %s RETURNING upload_id", (upload_id,))
+                cur.execute(
+                    "SELECT count(*) AS cnt FROM imported_agent_sessions WHERE upload_id = %s",
+                    (upload_id,),
+                )
+                return cur.fetchone()["cnt"]
+
+    def delete_span_upload(self, upload_id: str, user_id: str | None = None) -> bool:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                if user_id:
+                    cur.execute(
+                        "DELETE FROM span_uploads WHERE upload_id = %s AND user_id = %s RETURNING upload_id",
+                        (upload_id, user_id),
+                    )
+                else:
+                    cur.execute("DELETE FROM span_uploads WHERE upload_id = %s RETURNING upload_id", (upload_id,))
                 deleted = cur.fetchone() is not None
                 conn.commit()
                 return deleted
+
+    def delete_all(self, user_id: str | None = None) -> dict[str, int]:
+        """Delete imported span data. If *user_id* is given, only that user's
+        data is removed; otherwise **all** data is deleted.
+
+        Returns counts of deleted rows.
+        """
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                if user_id:
+                    cur.execute(
+                        "SELECT count(*) AS cnt FROM imported_agent_spans "
+                        "WHERE agent_session_id IN (SELECT id FROM imported_agent_sessions WHERE user_id = %s)",
+                        (user_id,),
+                    )
+                    span_count = cur.fetchone()["cnt"]
+                    cur.execute(
+                        "SELECT count(*) AS cnt FROM imported_agent_sessions WHERE user_id = %s",
+                        (user_id,),
+                    )
+                    session_count = cur.fetchone()["cnt"]
+                    cur.execute(
+                        "SELECT count(*) AS cnt FROM span_uploads WHERE user_id = %s",
+                        (user_id,),
+                    )
+                    upload_count = cur.fetchone()["cnt"]
+                    # Cascade from span_uploads handles sessions + spans linked via upload
+                    cur.execute("DELETE FROM span_uploads WHERE user_id = %s", (user_id,))
+                    # Clean up any orphaned sessions/spans for this user not linked to an upload
+                    cur.execute(
+                        "DELETE FROM imported_agent_spans "
+                        "WHERE agent_session_id IN (SELECT id FROM imported_agent_sessions WHERE user_id = %s)",
+                        (user_id,),
+                    )
+                    cur.execute("DELETE FROM imported_agent_sessions WHERE user_id = %s", (user_id,))
+                else:
+                    cur.execute("SELECT count(*) AS cnt FROM imported_agent_spans")
+                    span_count = cur.fetchone()["cnt"]
+                    cur.execute("SELECT count(*) AS cnt FROM imported_agent_sessions")
+                    session_count = cur.fetchone()["cnt"]
+                    cur.execute("SELECT count(*) AS cnt FROM span_uploads")
+                    upload_count = cur.fetchone()["cnt"]
+                    cur.execute("DELETE FROM span_uploads")
+                    cur.execute("DELETE FROM imported_agent_spans")
+                    cur.execute("DELETE FROM imported_agent_sessions")
+                conn.commit()
+                return {
+                    "imported_agent_spans": span_count,
+                    "imported_agent_sessions": session_count,
+                    "span_uploads": upload_count,
+                }
 
     # ------------------------------------------------------------------
     # Agent sessions (mirrors ClickHouseClient / BigQueryClient interface)
     # ------------------------------------------------------------------
 
-    def get_agent_sessions(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    def get_agent_sessions(self, limit: int = 50, offset: int = 0, user_id: str | None = None) -> list[dict[str, Any]]:
+        t0 = time.perf_counter()
         with self._get_conn() as conn:
             with conn.cursor() as cur:
+                where = "WHERE s.user_id = %s " if user_id else ""
+                params: list = [user_id] if user_id else []
                 cur.execute(
-                    "SELECT * FROM imported_agent_sessions ORDER BY created_at DESC LIMIT %s OFFSET %s",
-                    (limit, offset),
+                    f"""SELECT s.*, COALESCE(c.cnt, 0) AS span_count
+                    FROM imported_agent_sessions s
+                    LEFT JOIN LATERAL (
+                        SELECT count(*) AS cnt
+                        FROM imported_agent_spans
+                        WHERE agent_session_id = s.id
+                    ) c ON TRUE
+                    {where}ORDER BY s.created_at DESC LIMIT %s OFFSET %s""",
+                    (*params, limit, offset),
                 )
-                return [self._to_session_dict(row) for row in cur.fetchall()]
+                rows = [self._to_session_dict(row) for row in cur.fetchall()]
+        elapsed = time.perf_counter() - t0
+        logger.info("get_agent_sessions(limit=%s, offset=%s) returned %d rows in %.3fs", limit, offset, len(rows), elapsed)
+        return rows
 
-    def count_agent_sessions(self) -> int:
+    def count_agent_sessions(self, user_id: str | None = None) -> int:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT count(*) AS cnt FROM imported_agent_sessions")
+                if user_id:
+                    cur.execute("SELECT count(*) AS cnt FROM imported_agent_sessions WHERE user_id = %s", (user_id,))
+                else:
+                    cur.execute("SELECT count(*) AS cnt FROM imported_agent_sessions")
                 return cur.fetchone()["cnt"]
 
-    def get_agent_session(self, session_id: str) -> dict[str, Any] | None:
+    def get_agent_session(self, session_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM imported_agent_sessions WHERE id = %s", (session_id,))
+                if user_id:
+                    cur.execute("SELECT * FROM imported_agent_sessions WHERE id = %s AND user_id = %s", (session_id, user_id))
+                else:
+                    cur.execute("SELECT * FROM imported_agent_sessions WHERE id = %s", (session_id,))
                 row = cur.fetchone()
                 return self._to_session_dict(row) if row else None
 
@@ -226,15 +353,21 @@ class PostgresSpanClient:
                     result[d["id"]] = d
                 return result
 
-    def check_session_ids_exist(self, session_ids: list[str]) -> set[str]:
+    def check_session_ids_exist(self, session_ids: list[str], user_id: str | None = None) -> set[str]:
         if not session_ids:
             return set()
         with self._get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id FROM imported_agent_sessions WHERE id = ANY(%s)",
-                    (session_ids,),
-                )
+                if user_id:
+                    cur.execute(
+                        "SELECT id FROM imported_agent_sessions WHERE id = ANY(%s) AND user_id = %s",
+                        (session_ids, user_id),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT id FROM imported_agent_sessions WHERE id = ANY(%s)",
+                        (session_ids,),
+                    )
                 return {row["id"] for row in cur.fetchall()}
 
     # ------------------------------------------------------------------
@@ -356,11 +489,21 @@ class PostgresSpanClient:
     # Dashboard aggregates
     # ------------------------------------------------------------------
 
-    def get_dashboard_stats(self, days: int = 7) -> dict[str, Any]:
+    def _user_session_subquery(self, user_id: str | None) -> str:
+        """Return a SQL clause to filter spans by user's sessions."""
+        if user_id:
+            return "AND agent_session_id IN (SELECT id FROM imported_agent_sessions WHERE user_id = %s) "
+        return ""
+
+    def get_dashboard_stats(self, days: int = 7, user_id: str | None = None) -> dict[str, Any]:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
+                user_clause = self._user_session_subquery(user_id)
+                params: list = [days]
+                if user_id:
+                    params.append(user_id)
                 cur.execute(
-                    """SELECT
+                    f"""SELECT
                         count(*) AS total_spans,
                         count(*) FILTER (WHERE span_type = 'llm.end') AS llm_calls,
                         count(*) FILTER (WHERE span_type = 'tool.end') AS tool_calls,
@@ -372,17 +515,22 @@ class PostgresSpanClient:
                         avg(duration_ms) FILTER (WHERE span_type = 'tool.end' AND duration_ms > 0) AS avg_tool_latency_ms,
                         count(*) FILTER (WHERE error != '') AS error_count
                     FROM imported_agent_spans
-                    WHERE created_at >= NOW() - INTERVAL '%s days'""",
-                    (days,),
+                    WHERE created_at >= NOW() - INTERVAL '%s days'
+                    {user_clause}""",
+                    params,
                 )
                 row = dict(cur.fetchone())
                 return {k: (v if v is not None else 0) for k, v in row.items()}
 
-    def get_span_timeseries(self, days: int = 7) -> list[dict[str, Any]]:
+    def get_span_timeseries(self, days: int = 7, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
+                user_clause = self._user_session_subquery(user_id)
+                params: list = [days]
+                if user_id:
+                    params.append(user_id)
                 cur.execute(
-                    """SELECT
+                    f"""SELECT
                         date_trunc('hour', created_at) AS bucket,
                         count(*) AS total,
                         count(*) FILTER (WHERE span_type = 'llm.end') AS llm_calls,
@@ -392,8 +540,9 @@ class PostgresSpanClient:
                         count(*) FILTER (WHERE error != '') AS errors
                     FROM imported_agent_spans
                     WHERE created_at >= NOW() - INTERVAL '%s days'
+                    {user_clause}
                     GROUP BY bucket ORDER BY bucket""",
-                    (days,),
+                    params,
                 )
                 rows = [dict(r) for r in cur.fetchall()]
                 for row in rows:
@@ -402,11 +551,16 @@ class PostgresSpanClient:
                             row[k] = 0
                 return rows
 
-    def get_top_models(self, days: int = 7, limit: int = 10) -> list[dict[str, Any]]:
+    def get_top_models(self, days: int = 7, limit: int = 10, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
+                user_clause = self._user_session_subquery(user_id)
+                params: list = [days]
+                if user_id:
+                    params.append(user_id)
+                params.append(limit)
                 cur.execute(
-                    """SELECT
+                    f"""SELECT
                         model,
                         count(*) AS call_count,
                         COALESCE(sum(total_tokens), 0) AS total_tokens,
@@ -416,8 +570,9 @@ class PostgresSpanClient:
                     FROM imported_agent_spans
                     WHERE span_type = 'llm.end' AND model != ''
                         AND created_at >= NOW() - INTERVAL '%s days'
+                    {user_clause}
                     GROUP BY model ORDER BY call_count DESC LIMIT %s""",
-                    (days, limit),
+                    params,
                 )
                 rows = [dict(r) for r in cur.fetchall()]
                 for row in rows:
@@ -426,11 +581,16 @@ class PostgresSpanClient:
                             row[k] = 0
                 return rows
 
-    def get_top_tools(self, days: int = 7, limit: int = 10) -> list[dict[str, Any]]:
+    def get_top_tools(self, days: int = 7, limit: int = 10, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
+                user_clause = self._user_session_subquery(user_id)
+                params: list = [days]
+                if user_id:
+                    params.append(user_id)
+                params.append(limit)
                 cur.execute(
-                    """SELECT
+                    f"""SELECT
                         tool_name,
                         count(*) AS call_count,
                         avg(duration_ms) AS avg_latency_ms,
@@ -438,8 +598,9 @@ class PostgresSpanClient:
                     FROM imported_agent_spans
                     WHERE span_type = 'tool.end' AND tool_name != ''
                         AND created_at >= NOW() - INTERVAL '%s days'
+                    {user_clause}
                     GROUP BY tool_name ORDER BY call_count DESC LIMIT %s""",
-                    (days, limit),
+                    params,
                 )
                 rows = [dict(r) for r in cur.fetchall()]
                 for row in rows:
@@ -448,20 +609,92 @@ class PostgresSpanClient:
                             row[k] = 0
                 return rows
 
-    def get_session_count(self, days: int = 7) -> dict[str, int]:
+    def get_session_count(self, days: int = 7, user_id: str | None = None) -> dict[str, int]:
         with self._get_conn() as conn:
             with conn.cursor() as cur:
+                user_filter = "AND user_id = %s " if user_id else ""
+                params: list = [days]
+                if user_id:
+                    params.append(user_id)
                 cur.execute(
-                    """SELECT
+                    f"""SELECT
                         count(*) AS total,
                         count(*) FILTER (WHERE status = 'running') AS running,
                         count(*) FILTER (WHERE status = 'completed') AS completed,
                         count(*) FILTER (WHERE status = 'failed') AS failed
                     FROM imported_agent_sessions
-                    WHERE created_at >= NOW() - INTERVAL '%s days'""",
-                    (days,),
+                    WHERE created_at >= NOW() - INTERVAL '%s days'
+                    {user_filter}""",
+                    params,
                 )
                 return dict(cur.fetchone())
+
+    def get_span_activity(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        """Daily span counts over the full stored time range.
+
+        Uses ``started_at`` (epoch float) as the span's real timestamp since
+        ``created_at`` is just the import time.
+        """
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                user_clause = self._user_session_subquery(user_id)
+                params: list = [user_id] if user_id else []
+                cur.execute(
+                    f"""SELECT to_timestamp(started_at)::date AS day, count(*) AS count
+                    FROM imported_agent_spans
+                    WHERE started_at IS NOT NULL
+                    {user_clause}
+                    GROUP BY day ORDER BY day""",
+                    params if params else None,
+                )
+                return [dict(r) for r in cur.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Clustering helpers
+    # ------------------------------------------------------------------
+
+    def get_session_start_data(self, session_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Fetch the data JSONB from session.start spans, keyed by session_id."""
+        if not session_ids:
+            return {}
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT agent_session_id, data
+                    FROM imported_agent_spans
+                    WHERE agent_session_id = ANY(%s) AND span_type = 'session.start'""",
+                    (session_ids,),
+                )
+                result: dict[str, dict[str, Any]] = {}
+                for row in cur.fetchall():
+                    d = dict(row)
+                    data = d.get("data", {})
+                    if isinstance(data, str):
+                        try:
+                            data = json.loads(data)
+                        except (json.JSONDecodeError, TypeError):
+                            data = {}
+                    result[d["agent_session_id"]] = data or {}
+                return result
+
+    def get_session_tool_names(self, session_ids: list[str]) -> dict[str, list[str]]:
+        """Fetch distinct tool names per session."""
+        if not session_ids:
+            return {}
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT agent_session_id, array_agg(DISTINCT tool_name) AS tools
+                    FROM imported_agent_spans
+                    WHERE agent_session_id = ANY(%s) AND span_type = 'tool.end' AND tool_name != ''
+                    GROUP BY agent_session_id""",
+                    (session_ids,),
+                )
+                result: dict[str, list[str]] = {}
+                for row in cur.fetchall():
+                    d = dict(row)
+                    result[d["agent_session_id"]] = d.get("tools") or []
+                return result
 
     # ------------------------------------------------------------------
     # Helpers

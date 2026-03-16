@@ -25,7 +25,13 @@ interface EvalRowData {
   upload_id: string;
   session_id: string;
   ground_truth: string;
+  rating: string;
+  trajectory_alignment: string;
+  task_success: string;
   tags: string;
+  reference_trajectory: string;
+  reference_state: string;
+  reference_answer: string;
   created_at: string;
   session: {
     name: string;
@@ -102,7 +108,7 @@ export const EvalExplorerDetail: React.FC<{ sessionId: string }> = ({ sessionId 
       {/* Header */}
       <div className="flex items-center gap-3 px-6 py-3 border-b border-gray-200 bg-white flex-shrink-0">
         <button
-          onClick={() => router.push("/eval-input")}
+          onClick={() => router.back()}
           className="p-1 hover:bg-gray-100 rounded-md transition-colors"
           title="Back to Eval Explorer"
         >
@@ -214,7 +220,57 @@ export const EvalExplorerDetail: React.FC<{ sessionId: string }> = ({ sessionId 
                       <div className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
                         {row.ground_truth}
                       </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {row.rating && (
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200">
+                            <span className="text-[11px] text-amber-600 font-medium">Rating:</span>
+                            <span className="text-xs font-semibold text-amber-700">{row.rating}</span>
+                          </span>
+                        )}
+                        {row.trajectory_alignment && (
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200">
+                            <span className="text-[11px] text-blue-600 font-medium">Alignment:</span>
+                            <span className="text-xs font-semibold text-blue-700">{row.trajectory_alignment}</span>
+                          </span>
+                        )}
+                        {row.task_success && (
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${row.task_success === "true" ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
+                            <span className={`text-[11px] font-medium ${row.task_success === "true" ? "text-green-600" : "text-red-600"}`}>Task:</span>
+                            <span className={`text-xs font-semibold ${row.task_success === "true" ? "text-green-700" : "text-red-700"}`}>{row.task_success}</span>
+                          </span>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Reference fields */}
+                    {(row.reference_trajectory || row.reference_state || row.reference_answer) && (
+                      <div className="px-4 pb-3 space-y-2.5">
+                        {row.reference_trajectory && (
+                          <div>
+                            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Reference Trajectory</div>
+                            <div className="text-sm text-gray-700 whitespace-pre-wrap break-words bg-gray-50 rounded p-2.5 border border-gray-100">
+                              {row.reference_trajectory}
+                            </div>
+                          </div>
+                        )}
+                        {row.reference_state && (
+                          <div>
+                            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Reference State</div>
+                            <div className="text-sm text-gray-700 whitespace-pre-wrap break-words bg-gray-50 rounded p-2.5 border border-gray-100">
+                              {row.reference_state}
+                            </div>
+                          </div>
+                        )}
+                        {row.reference_answer && (
+                          <div>
+                            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-1">Reference Answer</div>
+                            <div className="text-sm text-gray-700 whitespace-pre-wrap break-words bg-gray-50 rounded p-2.5 border border-gray-100">
+                              {row.reference_answer}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Tags + metadata footer */}
                     <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100">

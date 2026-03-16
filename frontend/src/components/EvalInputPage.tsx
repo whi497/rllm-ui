@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useCallback, useRef, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   UploadIcon,
   DeleteIcon,
@@ -27,7 +27,13 @@ interface EvalUploadRow {
   upload_id: string;
   session_id: string;
   ground_truth: string;
+  rating: string;
+  trajectory_alignment: string;
+  task_success: string;
   tags: string;
+  reference_trajectory: string;
+  reference_state: string;
+  reference_answer: string;
   created_at: string;
 }
 
@@ -46,12 +52,21 @@ interface ExplorerRow {
   upload_id: string;
   session_id: string;
   ground_truth: string;
+  rating: string;
+  trajectory_alignment: string;
+  task_success: string;
   tags: string;
+  reference_trajectory: string;
+  reference_state: string;
+  reference_answer: string;
   created_at: string;
   session: ExplorerSessionInfo | null;
 }
 
 type ViewMode = "upload" | "explorer";
+
+const INSPECT_PAGE_SIZE = 20;
+const EXPLORER_PAGE_SIZE = 25;
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -94,7 +109,21 @@ const ExpandableText: React.FC<{ text: string }> = ({ text }) => {
 
 export const EvalInputPage: React.FC = () => {
   const router = useRouter();
-  const [viewMode, setViewMode] = useState<ViewMode>("upload");
+  const searchParams = useSearchParams();
+  const initView = (searchParams.get("view") === "explorer" ? "explorer" : "upload") as ViewMode;
+  const initPage = Math.max(0, parseInt(searchParams.get("page") || "0", 10) || 0);
+  const [viewMode, setViewMode] = useState<ViewMode>(initView);
+  const [explorerPage, setExplorerPage] = useState(initPage);
+
+  // Keep URL in sync
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (viewMode !== "upload") params.set("view", viewMode);
+    if (viewMode === "explorer" && explorerPage > 0) params.set("page", String(explorerPage));
+    const qs = params.toString();
+    const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState(window.history.state, "", url);
+  }, [viewMode, explorerPage]);
   const [uploads, setUploads] = useState<EvalUpload[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -154,6 +183,14 @@ export const EvalInputPage: React.FC = () => {
       setExplorerLoaded(true);
     }
   }, [explorerUploadFilter]);
+
+  // Fetch explorer data on mount if starting in explorer view
+  useEffect(() => {
+    if (viewMode === "explorer" && !explorerLoaded) {
+      fetchExplorer();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load explorer data when switching to explorer view
   const handleViewChange = (mode: ViewMode) => {
@@ -259,7 +296,7 @@ export const EvalInputPage: React.FC = () => {
   }
 
   return (
-    <div className="h-full p-8 overflow-auto">
+    <div className="h-full p-8 overflow-auto" data-eval-scroll>
       <div className="w-full">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -320,6 +357,8 @@ export const EvalInputPage: React.FC = () => {
             loading={explorerLoading}
             search={explorerSearch}
             onSearchChange={setExplorerSearch}
+            page={explorerPage}
+            onPageChange={setExplorerPage}
             uploads={uploads}
             uploadFilter={explorerUploadFilter}
             onUploadFilterChange={(v) => {
@@ -329,10 +368,95 @@ export const EvalInputPage: React.FC = () => {
               setTimeout(() => fetchExplorer(), 0);
             }}
             onRefresh={fetchExplorer}
-            onRowClick={(sessionId) => router.push(`/eval-input/${sessionId}`)}
+            onRowClick={(sessionId) => {
+              const scrollEl = document.querySelector("[data-eval-scroll]");
+              if (scrollEl) {
+                sessionStorage.setItem("eval-explorer-scroll", String(scrollEl.scrollTop));
+              }
+              router.push(`/eval-input/${sessionId}`);
+            }}
           />
         )}
       </div>
+    </div>
+  );
+};
+
+/* ─── Paginated inspect table ──────────────────────────────────── */
+
+const PaginatedInspectTable: React.FC<{ rows: EvalUploadRow[] }> = ({ rows }) => {
+  const [page, setPage] = useState(0);
+  const totalPages = Math.ceil(rows.length / INSPECT_PAGE_SIZE);
+  const start = page * INSPECT_PAGE_SIZE;
+  const pageRows = rows.slice(start, start + INSPECT_PAGE_SIZE);
+
+  // Only show optional columns if any row has data
+  const hasTrajAlign = rows.some((r) => r.trajectory_alignment);
+  const hasTaskSuccess = rows.some((r) => r.task_success);
+  const hasRefTraj = rows.some((r) => r.reference_trajectory);
+  const hasRefState = rows.some((r) => r.reference_state);
+  const hasRefAnswer = rows.some((r) => r.reference_answer);
+
+  return (
+    <div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-gray-500 border-b border-gray-200">
+              <th className="pb-2 pr-3 font-medium">#</th>
+              <th className="pb-2 pr-3 font-medium">session_id</th>
+              <th className="pb-2 pr-3 font-medium">ground_truth</th>
+              <th className="pb-2 pr-3 font-medium">rating</th>
+              {hasTrajAlign && <th className="pb-2 pr-3 font-medium">traj_alignment</th>}
+              {hasTaskSuccess && <th className="pb-2 pr-3 font-medium">task_success</th>}
+              <th className="pb-2 pr-3 font-medium">tags</th>
+              {hasRefTraj && <th className="pb-2 pr-3 font-medium">ref_trajectory</th>}
+              {hasRefState && <th className="pb-2 pr-3 font-medium">ref_state</th>}
+              {hasRefAnswer && <th className="pb-2 font-medium">ref_answer</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {pageRows.map((row, idx) => (
+              <tr key={row.id} className="text-gray-700">
+                <td className="py-1.5 pr-3 text-gray-400 tabular-nums">{start + idx + 1}</td>
+                <td className="py-1.5 pr-3 font-mono text-xs max-w-[200px] truncate">{row.session_id}</td>
+                <td className="py-1.5 pr-3 max-w-[300px] truncate">{row.ground_truth}</td>
+                <td className="py-1.5 pr-3 text-xs">{row.rating || "-"}</td>
+                {hasTrajAlign && <td className="py-1.5 pr-3 text-xs max-w-[150px] truncate">{row.trajectory_alignment || "-"}</td>}
+                {hasTaskSuccess && <td className="py-1.5 pr-3 text-xs">{row.task_success || "-"}</td>}
+                <td className="py-1.5 pr-3 max-w-[150px] truncate">{row.tags}</td>
+                {hasRefTraj && <td className="py-1.5 pr-3 max-w-[200px] truncate">{row.reference_trajectory || "-"}</td>}
+                {hasRefState && <td className="py-1.5 pr-3 max-w-[200px] truncate">{row.reference_state || "-"}</td>}
+                {hasRefAnswer && <td className="py-1.5 max-w-[200px] truncate">{row.reference_answer || "-"}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
+          <p className="text-xs text-gray-400">
+            {start + 1}–{Math.min(start + INSPECT_PAGE_SIZE, rows.length)} of {rows.length}
+          </p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(Math.max(0, page - 1))}
+              disabled={page === 0}
+              className="px-2 py-1 text-xs font-medium rounded border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Prev
+            </button>
+            <span className="text-xs text-gray-500 px-1">{page + 1} / {totalPages}</span>
+            <button
+              onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+              disabled={page >= totalPages - 1}
+              className="px-2 py-1 text-xs font-medium rounded border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -363,7 +487,7 @@ const UploadView: React.FC<{
 }) => (
   <div className="max-w-5xl">
     <p className="text-sm text-gray-500 mb-6">
-      Import evaluation results from CSV files. Required columns: <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">session_id</code>, <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">ground_truth</code>. Optional: <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">tags</code>. Session IDs are validated against available data sources.
+      Import evaluation results from CSV files. Required columns: <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">session_id</code>, <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">ground_truth</code>, <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">rating</code>. Optional: <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">tags</code>, <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">trajectory_alignment</code>, <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">task_success</code>, <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">reference_trajectory</code>, <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">reference_state</code>, <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">reference_answer</code>. Session IDs are validated against available data sources.
     </p>
 
     {/* Upload area */}
@@ -467,28 +591,7 @@ const UploadView: React.FC<{
                   ) : inspectRows.length === 0 ? (
                     <p className="text-sm text-gray-400 text-center py-2">No rows</p>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="text-left text-xs text-gray-500 border-b border-gray-200">
-                            <th className="pb-2 pr-3 font-medium">#</th>
-                            <th className="pb-2 pr-3 font-medium">session_id</th>
-                            <th className="pb-2 pr-3 font-medium">ground_truth</th>
-                            <th className="pb-2 font-medium">tags</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {inspectRows.map((row, idx) => (
-                            <tr key={row.id} className="text-gray-700">
-                              <td className="py-1.5 pr-3 text-gray-400 tabular-nums">{idx + 1}</td>
-                              <td className="py-1.5 pr-3 font-mono text-xs max-w-[200px] truncate">{row.session_id}</td>
-                              <td className="py-1.5 pr-3 max-w-[300px] truncate">{row.ground_truth}</td>
-                              <td className="py-1.5 max-w-[150px] truncate">{row.tags}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <PaginatedInspectTable rows={inspectRows} />
                   )}
                 </div>
               )}
@@ -536,12 +639,41 @@ const ExplorerView: React.FC<{
   loading: boolean;
   search: string;
   onSearchChange: (v: string) => void;
+  page: number;
+  onPageChange: (p: number) => void;
   uploads: EvalUpload[];
   uploadFilter: string;
   onUploadFilterChange: (v: string) => void;
   onRefresh: () => void;
   onRowClick: (sessionId: string) => void;
-}> = ({ rows, loading, search, onSearchChange, uploads, uploadFilter, onUploadFilterChange, onRefresh, onRowClick }) => {
+}> = ({ rows, loading, search, onSearchChange, page, onPageChange, uploads, uploadFilter, onUploadFilterChange, onRefresh, onRowClick }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Restore scroll position after data loads
+  const scrollRestored = useRef(false);
+  useEffect(() => {
+    if (scrollRestored.current || loading || rows.length === 0) return;
+    const saved = sessionStorage.getItem("eval-explorer-scroll");
+    if (saved) {
+      scrollRestored.current = true;
+      requestAnimationFrame(() => {
+        const el = document.querySelector("[data-eval-scroll]");
+        if (el) el.scrollTop = parseInt(saved, 10);
+        sessionStorage.removeItem("eval-explorer-scroll");
+      });
+    }
+  }, [loading, rows.length]);
+
+  // Clamp page when rows change
+  const totalPages = Math.ceil(rows.length / EXPLORER_PAGE_SIZE);
+  const safePage = Math.min(page, Math.max(0, totalPages - 1));
+  useEffect(() => {
+    if (safePage !== page) onPageChange(safePage);
+  }, [safePage, page, onPageChange]);
+
+  const start = safePage * EXPLORER_PAGE_SIZE;
+  const pageRows = rows.slice(start, start + EXPLORER_PAGE_SIZE);
+
   if (loading) {
     return (
       <div className="flex justify-center py-16">
@@ -551,7 +683,7 @@ const ExplorerView: React.FC<{
   }
 
   return (
-    <div>
+    <div ref={scrollRef}>
       {/* Filters row */}
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1 max-w-sm">
@@ -604,6 +736,14 @@ const ExplorerView: React.FC<{
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
+            {(() => {
+              const hasTrajAlign = rows.some((r) => r.trajectory_alignment);
+              const hasTaskSuccess = rows.some((r) => r.task_success);
+              const hasRefTraj = rows.some((r) => r.reference_trajectory);
+              const hasRefState = rows.some((r) => r.reference_state);
+              const hasRefAnswer = rows.some((r) => r.reference_answer);
+              const refCols = { hasTrajAlign, hasTaskSuccess, hasRefTraj, hasRefState, hasRefAnswer };
+              return (
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr className="text-left text-xs text-gray-500">
@@ -611,16 +751,50 @@ const ExplorerView: React.FC<{
                   <th className="px-4 py-3 font-medium w-[100px]">Agent</th>
                   <th className="px-4 py-3 font-medium w-[80px]">Spans</th>
                   <th className="px-4 py-3 font-medium">Ground Truth</th>
+                  <th className="px-4 py-3 font-medium w-[70px]">Rating</th>
+                  {hasTrajAlign && <th className="px-4 py-3 font-medium w-[120px]">Traj Alignment</th>}
+                  {hasTaskSuccess && <th className="px-4 py-3 font-medium w-[90px]">Task Success</th>}
                   <th className="px-4 py-3 font-medium w-[120px]">Tags</th>
+                  {hasRefTraj && <th className="px-4 py-3 font-medium w-[150px]">Ref Trajectory</th>}
+                  {hasRefState && <th className="px-4 py-3 font-medium w-[150px]">Ref State</th>}
+                  {hasRefAnswer && <th className="px-4 py-3 font-medium w-[150px]">Ref Answer</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {rows.map((row) => (
-                  <ExplorerTableRow key={row.id} row={row} onClick={() => onRowClick(row.session_id)} />
+                {pageRows.map((row) => (
+                  <ExplorerTableRow key={row.id} row={row} refCols={refCols} onClick={() => onRowClick(row.session_id)} />
                 ))}
               </tbody>
             </table>
+              );
+            })()}
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
+              <p className="text-xs text-gray-500">
+                {start + 1}–{Math.min(start + EXPLORER_PAGE_SIZE, rows.length)} of {rows.length}
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onPageChange(Math.max(0, safePage - 1))}
+                  disabled={safePage === 0}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <span className="text-xs text-gray-500 px-2">{safePage + 1} / {totalPages}</span>
+                <button
+                  onClick={() => onPageChange(Math.min(totalPages - 1, safePage + 1))}
+                  disabled={safePage >= totalPages - 1}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -629,7 +803,15 @@ const ExplorerView: React.FC<{
 
 /* ─── Explorer table row ───────────────────────────────────────── */
 
-const ExplorerTableRow: React.FC<{ row: ExplorerRow; onClick: () => void }> = ({ row, onClick }) => {
+interface RefColFlags {
+  hasTrajAlign: boolean;
+  hasTaskSuccess: boolean;
+  hasRefTraj: boolean;
+  hasRefState: boolean;
+  hasRefAnswer: boolean;
+}
+
+const ExplorerTableRow: React.FC<{ row: ExplorerRow; refCols: RefColFlags; onClick: () => void }> = ({ row, refCols, onClick }) => {
   const sess = row.session;
 
   return (
@@ -670,6 +852,39 @@ const ExplorerTableRow: React.FC<{ row: ExplorerRow; onClick: () => void }> = ({
         <ExpandableText text={row.ground_truth} />
       </td>
 
+      {/* Rating */}
+      <td className="px-4 py-3">
+        {row.rating ? (
+          <span className="text-xs font-medium text-gray-700">{row.rating}</span>
+        ) : (
+          <span className="text-xs text-gray-300">-</span>
+        )}
+      </td>
+
+      {/* Trajectory alignment (conditional) */}
+      {refCols.hasTrajAlign && (
+        <td className="px-4 py-3">
+          {row.trajectory_alignment ? (
+            <span className="text-xs text-gray-700">{row.trajectory_alignment}</span>
+          ) : (
+            <span className="text-xs text-gray-300">-</span>
+          )}
+        </td>
+      )}
+
+      {/* Task success (conditional) */}
+      {refCols.hasTaskSuccess && (
+        <td className="px-4 py-3">
+          {row.task_success ? (
+            <span className={`text-xs font-medium ${row.task_success === "true" ? "text-green-700" : "text-red-600"}`}>
+              {row.task_success}
+            </span>
+          ) : (
+            <span className="text-xs text-gray-300">-</span>
+          )}
+        </td>
+      )}
+
       {/* Tags */}
       <td className="px-4 py-3">
         {row.tags ? (
@@ -687,6 +902,23 @@ const ExplorerTableRow: React.FC<{ row: ExplorerRow; onClick: () => void }> = ({
           <span className="text-xs text-gray-300">-</span>
         )}
       </td>
+
+      {/* Reference columns (conditional) */}
+      {refCols.hasRefTraj && (
+        <td className="px-4 py-3 text-sm text-gray-700 max-w-[200px]">
+          {row.reference_trajectory ? <ExpandableText text={row.reference_trajectory} /> : <span className="text-xs text-gray-300">-</span>}
+        </td>
+      )}
+      {refCols.hasRefState && (
+        <td className="px-4 py-3 text-sm text-gray-700 max-w-[200px]">
+          {row.reference_state ? <ExpandableText text={row.reference_state} /> : <span className="text-xs text-gray-300">-</span>}
+        </td>
+      )}
+      {refCols.hasRefAnswer && (
+        <td className="px-4 py-3 text-sm text-gray-700 max-w-[200px]">
+          {row.reference_answer ? <ExpandableText text={row.reference_answer} /> : <span className="text-xs text-gray-300">-</span>}
+        </td>
+      )}
     </tr>
   );
 };
