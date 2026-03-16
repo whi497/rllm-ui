@@ -1,5 +1,12 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function HomePage() {
-  redirect("/observability");
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/observability");
+  }, [router]);
+  return null;
 }
