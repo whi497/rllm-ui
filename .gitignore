@@ -17,6 +17,8 @@ api/pgdata/
 
 # Environment
 .env
+.env.local
+.env.prod
 
 # Build/cache
 .vite/

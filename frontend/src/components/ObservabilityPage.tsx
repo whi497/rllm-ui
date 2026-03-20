@@ -81,6 +81,13 @@ const TrashIcon: React.FC<{ size?: number; className?: string }> = ({ size = 16,
   </svg>
 );
 
+const RefreshIcon: React.FC<{ size?: number; className?: string }> = ({ size = 16, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polyline points="23 4 23 10 17 10" />
+    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+  </svg>
+);
+
 const PAGE_SIZE = 20;
 
 const ENABLED_SOURCES: DataSource[] = ["postgres", "clickhouse"]; // bigquery temporarily disabled
@@ -249,6 +256,14 @@ export const ObservabilityPage: React.FC = () => {
               ))}
             </div>
             <button
+              onClick={() => { setLoading(true); fetchSessions(); }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-100 transition-all"
+              title="Refresh sessions"
+            >
+              <RefreshIcon size={13} />
+              Refresh
+            </button>
+            <button
               onClick={() => setDeleteConfirmSource(dataSource)}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-red-600 hover:bg-red-50 transition-all"
               title={`Delete all ${DATA_SOURCE_LABELS[dataSource]} data`}
@@ -295,7 +310,7 @@ export const ObservabilityPage: React.FC = () => {
                 </div>
                 <input
                   type="text"
-                  placeholder="Search sessions..."
+                  placeholder="Search by name, session ID, or status..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400 transition-all duration-200"

@@ -216,7 +216,13 @@ const TokenChart: React.FC<{ data: TimeseriesBucket[] }> = ({ data }) => {
 
   return (
     <ResponsiveContainer width="100%" height={200}>
-      <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+      <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+        <defs>
+          <linearGradient id="tokenUsageGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.25} />
+            <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+          </linearGradient>
+        </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
         <XAxis
           dataKey="time"
@@ -235,8 +241,8 @@ const TokenChart: React.FC<{ data: TimeseriesBucket[] }> = ({ data }) => {
           contentStyle={{ fontSize: 12, border: "1px solid #e5e7eb", borderRadius: 8 }}
           formatter={(value) => [formatNumber(Number(value ?? 0)), "Tokens"]}
         />
-        <Bar dataKey="tokens" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-      </BarChart>
+        <Area type="monotone" dataKey="tokens" stroke="#3b82f6" strokeWidth={2.5} fill="url(#tokenUsageGradient)" />
+      </AreaChart>
     </ResponsiveContainer>
   );
 };

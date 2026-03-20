@@ -126,7 +126,7 @@ export function groupByInvocation(spans: Span[]): InvocationGroup[] {
 
   // Session-level spans as their own group
   if (sessionSpans.length > 0) {
-    const times = sessionSpans.map((s) => new Date(s.created_at).getTime());
+    const times = sessionSpans.map((s) => spanStartMs(s));
     groups.push({
       invocationId: "__session__",
       spans: sessionSpans,
@@ -136,7 +136,7 @@ export function groupByInvocation(spans: Span[]): InvocationGroup[] {
   }
 
   for (const [invId, invSpans] of map) {
-    const times = invSpans.map((s) => new Date(s.created_at).getTime());
+    const times = invSpans.map((s) => spanStartMs(s));
     groups.push({
       invocationId: invId,
       spans: invSpans,
@@ -149,11 +149,33 @@ export function groupByInvocation(spans: Span[]): InvocationGroup[] {
   return groups;
 }
 
+/** Get the span's actual start time in ms from its data epoch fields,
+ *  falling back to the server created_at timestamp. */
+function spanStartMs(span: Span): number {
+  // data.started_at — agent, llm, tool, invocation spans
+  const started = span.data?.started_at;
+  if (typeof started === "number" && started > 0) {
+    return started * 1000;
+  }
+  // data.timestamp — event spans
+  const ts = span.data?.timestamp;
+  if (typeof ts === "number" && ts > 0) {
+    return ts * 1000;
+  }
+  // data.created_at — session spans
+  const dataCreated = span.data?.created_at;
+  if (typeof dataCreated === "number" && dataCreated > 0) {
+    return dataCreated * 1000;
+  }
+  // Fallback: server ingestion timestamp
+  return new Date(span.created_at).getTime();
+}
+
 // Build a tree within an invocation: session > agent > llm/tool
 function buildSpanTree(spans: Span[]): SpanNode[] {
-  // Sort by created_at
+  // Sort by started_at epoch from span data (execution order, not ingestion order)
   const sorted = [...spans].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    (a, b) => spanStartMs(a) - spanStartMs(b)
   );
 
   // Simple nesting: pair .start/.end by span_id, nest by type hierarchy
@@ -165,18 +187,7 @@ function buildSpanTree(spans: Span[]): SpanNode[] {
     const baseType = span.span_type.replace(/\.(start|end)$/, "");
     const isEnd = span.span_type.endsWith(".end");
 
-    if (isEnd && span.span_id && startSpans.has(span.span_id)) {
-      // Merge end data into the start node's span
-      const startNode = startSpans.get(span.span_id)!;
-      // Keep the start span but add duration from end
-      if (span.duration_ms != null) {
-        startNode.span = { ...startNode.span, duration_ms: span.duration_ms };
-      }
-      if (span.error) {
-        startNode.span = { ...startNode.span, error: span.error };
-      }
-      continue;
-    }
+    // No merging — show .start and .end as separate sequential nodes
 
     const node: SpanNode = { span, children: [] };
 
@@ -189,7 +200,7 @@ function buildSpanTree(spans: Span[]): SpanNode[] {
       } else {
         nodes.push(node);
       }
-    } else if (baseType === "tool" || baseType === "llm") {
+    } else if (baseType === "tool" || baseType === "llm" || baseType === "event") {
       // Find the last agent node to nest under
       const agentParent = findLastNodeOfType(nodes, "agent");
       if (agentParent) {
@@ -268,8 +279,8 @@ const SpanTreeNode: React.FC<{
   const isSelected = selectedSpanId === node.span.id;
   const colors = getSpanColors(node.span.span_type);
 
-  // Timeline bar positioning
-  const spanStart = new Date(node.span.created_at).getTime();
+  // Timeline bar positioning (use actual execution start, not ingestion time)
+  const spanStart = spanStartMs(node.span);
   const offsetPct = globalDuration > 0 ? ((spanStart - globalStart) / globalDuration) * 100 : 0;
   const durationPct = node.span.duration_ms && globalDuration > 0
     ? (node.span.duration_ms / globalDuration) * 100
@@ -476,7 +487,7 @@ interface FlowStep {
 
 function extractFlowSteps(spans: Span[]): FlowStep[] {
   const sorted = [...spans].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    (a, b) => spanStartMs(a) - spanStartMs(b)
   );
 
   // Merge .start/.end pairs by span_id
@@ -487,26 +498,12 @@ function extractFlowSteps(spans: Span[]): FlowStep[] {
     const isEnd = span.span_type.endsWith(".end");
     const isStart = span.span_type.endsWith(".start");
 
-    if (isEnd && span.span_id && merged.has(span.span_id)) {
-      // Merge into the matching .start span
-      const start = merged.get(span.span_id)!;
-      if (span.duration_ms != null) start.duration_ms = span.duration_ms;
-      if (span.error) start.error = span.error;
-      continue;
-    }
-
-    if (isStart && span.span_id) {
-      merged.set(span.span_id, { ...span });
-    } else if (isEnd) {
-      // Orphaned .end with no matching .start — treat as standalone
-      standalone.push(span);
-    } else {
-      standalone.push(span);
-    }
+    // No merging — show all spans as separate sequential steps
+    standalone.push(span);
   }
 
   // Match tool.data spans to their tool.end/tool.start by tool_name.
-  const combined = [...merged.values(), ...standalone];
+  const combined = [...standalone];
   const toolDataSpans: Span[] = [];
   const nonToolData: Span[] = [];
   for (const s of combined) {
@@ -538,28 +535,23 @@ function extractFlowSteps(spans: Span[]): FlowStep[] {
     }
   }
 
-  // Pin session.start to top, agent.end to bottom, sort the rest by created_at
-  const sessionStarts: Span[] = [];
-  const agentEnds: Span[] = [];
-  const rest: Span[] = [];
-  for (const s of nonToolData) {
-    if (s.span_type === "session.start") sessionStarts.push(s);
-    else if (s.span_type === "agent.end") agentEnds.push(s);
-    else rest.push(s);
-  }
-  rest.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-  const allSpans = [...sessionStarts, ...rest, ...agentEnds];
+  // Sort all spans by execution time
+  nonToolData.sort((a, b) => spanStartMs(a) - spanStartMs(b));
+  const allSpans = nonToolData;
 
   const steps: FlowStep[] = [];
 
   for (const span of allSpans) {
     const baseType = span.span_type.replace(/\.(start|end)$/, "");
+    const isEnd = span.span_type.endsWith(".end");
+    const isStart = span.span_type.endsWith(".start");
+    const phase = isEnd ? " (end)" : isStart ? " (start)" : "";
 
     if (baseType === "invocation") {
       steps.push({
         id: span.id,
         type: "user",
-        label: "User Message",
+        label: isEnd ? "Invocation End" : "User Message",
         sublabel: `Invocation ${span.invocation_id?.slice(0, 8) || ""}`,
         duration_ms: span.duration_ms,
         error: span.error,
@@ -569,7 +561,7 @@ function extractFlowSteps(spans: Span[]): FlowStep[] {
       steps.push({
         id: span.id,
         type: "llm",
-        label: "LLM Call",
+        label: `LLM Call${phase}`,
         sublabel: span.model || span.agent_name || "",
         duration_ms: span.duration_ms,
         error: span.error,
@@ -579,7 +571,7 @@ function extractFlowSteps(spans: Span[]): FlowStep[] {
       steps.push({
         id: span.id,
         type: "tool",
-        label: span.tool_name || "Tool",
+        label: (span.tool_name || "Tool") + phase,
         sublabel: baseType === "tool.data" ? "tool data" : (span.data?.tool_type || "tool call"),
         duration_ms: span.duration_ms,
         error: span.error,
@@ -590,7 +582,7 @@ function extractFlowSteps(spans: Span[]): FlowStep[] {
       steps.push({
         id: span.id,
         type: "agent",
-        label: span.agent_name || "Agent",
+        label: (span.agent_name || "Agent") + phase,
         sublabel: "agent execution",
         duration_ms: span.duration_ms,
         error: span.error,
@@ -906,15 +898,15 @@ export const ObservabilitySessionDetail: React.FC<{ sessionId: string }> = ({
   // Group into invocations and build trees
   const invocationGroups = useMemo(() => groupByInvocation(filteredSpans), [filteredSpans]);
 
-  // Global time range for timeline bars
+  // Global time range for timeline bars (use execution time, not ingestion time)
   const globalStart = useMemo(() => {
     if (spans.length === 0) return 0;
-    return Math.min(...spans.map((s) => new Date(s.created_at).getTime()));
+    return Math.min(...spans.map((s) => spanStartMs(s)));
   }, [spans]);
 
   const globalEnd = useMemo(() => {
     if (spans.length === 0) return 0;
-    return Math.max(...spans.map((s) => new Date(s.created_at).getTime()));
+    return Math.max(...spans.map((s) => spanStartMs(s)));
   }, [spans]);
 
   const globalDuration = globalEnd - globalStart;
@@ -1002,6 +994,17 @@ export const ObservabilitySessionDetail: React.FC<{ sessionId: string }> = ({
           <div className="text-sm text-gray-500">
             {spans.length} span{spans.length !== 1 ? "s" : ""}
           </div>
+          <button
+            onClick={() => { initialLoadDone.current = false; fetchData(); }}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-100 transition-all"
+            title="Refresh spans"
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            Refresh
+          </button>
         </div>
       </div>
 
