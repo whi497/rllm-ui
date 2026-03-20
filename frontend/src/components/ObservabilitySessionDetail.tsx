@@ -413,7 +413,7 @@ export const SpanDetailPanel: React.FC<{ span: Span }> = ({ span }) => {
               <DetailRow label="Duration" value={`${span.duration_ms.toFixed(1)}ms`} />
             )}
             {span.error && <DetailRow label="Error" value={span.error} error />}
-            <DetailRow label="Created" value={new Date(span.created_at).toISOString()} />
+            <DetailRow label="Created" value={new Date(span.created_at.endsWith("Z") ? span.created_at : span.created_at + "Z").toLocaleString()} />
 
             {/* Token usage from data */}
             {span.data?.response?.usage && (

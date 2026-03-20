@@ -53,7 +53,8 @@ const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
 };
 
 function formatDate(iso: string): string {
-  const d = new Date(iso);
+  // Backend returns UTC timestamps without Z suffix — normalize so JS parses as UTC
+  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
   return (
     d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) +
     " " +

@@ -106,7 +106,13 @@ function formatLatency(ms: number): string {
 
 function formatBucketTime(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function formatDayRange(data: SpanActivityBucket[]): string {
@@ -149,7 +155,7 @@ const KpiCard: React.FC<{
 // Span Activity Chart (daily counts, full time range)
 // ---------------------------------------------------------------------------
 
-const SpanActivityChart: React.FC<{ data: SpanActivityBucket[] }> = ({ data }) => {
+const SpanActivityChart: React.FC<{ data: TimeseriesBucket[] }> = ({ data }) => {
   if (data.length === 0) {
     return (
       <div className="h-[200px] flex items-center justify-center text-sm text-gray-400">
@@ -159,8 +165,8 @@ const SpanActivityChart: React.FC<{ data: SpanActivityBucket[] }> = ({ data }) =
   }
 
   const chartData = data.map((b) => ({
-    ...b,
-    label: formatDay(b.day),
+    time: formatBucketTime(b.bucket),
+    spans: b.total,
   }));
 
   return (
@@ -174,7 +180,7 @@ const SpanActivityChart: React.FC<{ data: SpanActivityBucket[] }> = ({ data }) =
         </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
         <XAxis
-          dataKey="label"
+          dataKey="time"
           tick={{ fontSize: 11, fill: "#9ca3af" }}
           tickLine={false}
           axisLine={{ stroke: "#e5e7eb" }}
@@ -190,7 +196,7 @@ const SpanActivityChart: React.FC<{ data: SpanActivityBucket[] }> = ({ data }) =
           contentStyle={{ fontSize: 12, border: "1px solid #e5e7eb", borderRadius: 8 }}
           formatter={(value) => [formatNumber(Number(value ?? 0)), "Spans"]}
         />
-        <Area type="monotone" dataKey="count" stroke="#8b5cf6" strokeWidth={2.5} fill="url(#spanActivityGradient)" />
+        <Area type="monotone" dataKey="spans" stroke="#8b5cf6" strokeWidth={2.5} fill="url(#spanActivityGradient)" />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -539,13 +545,8 @@ export const ObservabilityDashboard: React.FC<{ dataSource?: string }> = ({ data
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <div className="flex items-baseline gap-2 mb-3">
-            <h3 className="text-sm font-semibold text-gray-900">Span Activity</h3>
-            {spanActivity.length > 0 && (
-              <span className="text-[11px] text-gray-400">{formatDayRange(spanActivity)}</span>
-            )}
-          </div>
-          <SpanActivityChart data={spanActivity} />
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">Span Activity</h3>
+          <SpanActivityChart data={timeseries} />
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <h3 className="text-sm font-semibold text-gray-900 mb-3">Token Usage</h3>
