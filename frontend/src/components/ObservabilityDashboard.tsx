@@ -105,7 +105,8 @@ function formatLatency(ms: number): string {
 }
 
 function formatBucketTime(iso: string): string {
-  const d = new Date(iso);
+  // Backend returns UTC timestamps without Z suffix — normalize
+  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
   return d.toLocaleString("en-US", {
     month: "short",
     day: "numeric",
