@@ -656,9 +656,18 @@ class SQLiteStore(DataStore):
             d["task"] = json.loads(d["task"])
         return d
 
-    def get_episodes(self, session_id: str) -> list[dict[str, Any]]:
+    def get_episodes(self, session_id: str, step: int | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
-            rows = conn.execute("SELECT * FROM episodes WHERE session_id = ? ORDER BY step", (session_id,)).fetchall()
+            if step is not None:
+                rows = conn.execute(
+                    "SELECT * FROM episodes WHERE session_id = ? AND step = ? ORDER BY step",
+                    (session_id, step),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM episodes WHERE session_id = ? ORDER BY step",
+                    (session_id,),
+                ).fetchall()
             results = []
             for row in rows:
                 results.append(self._parse_episode_row(dict(row)))

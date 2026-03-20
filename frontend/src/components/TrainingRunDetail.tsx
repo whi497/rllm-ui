@@ -23,7 +23,6 @@ import { getExperimentColor } from "../utils/experimentColors";
 import { useExperimentVisibility } from "../contexts/ExperimentVisibilityContext";
 import { apiFetch } from "../config/api";
 import { Spinner, EmptyState } from "./ui";
-import { usePolling } from "../hooks/usePolling";
 
 type SessionStatus = "running" | "completed" | "failed" | "crashed";
 
@@ -68,35 +67,6 @@ const StatusBadge: React.FC<{ status: SessionStatus }> = ({ status }) => {
   );
 };
 
-interface Episode {
-  id: string;
-  session_id: string;
-  step: number;
-  task: Record<string, any>;
-  is_correct: boolean;
-  reward: number | null;
-  termination_reason: string | null;
-  trajectories: Trajectory[];
-  metrics?: Record<string, any>;
-  info?: Record<string, any>;
-  created_at: string;
-}
-
-interface Trajectory {
-  uid: string;
-  reward: number;
-  steps: TrajectoryStep[];
-}
-
-interface TrajectoryStep {
-  observation: any;
-  action: any;
-  reward: number;
-  done: boolean;
-  chat_completions?: any;
-  model_response?: any;
-}
-
 export const TrainingRunDetail: React.FC = () => {
   const params = useParams<{ sessionId: string }>();
   const sessionId = params.sessionId as string;
@@ -104,7 +74,6 @@ export const TrainingRunDetail: React.FC = () => {
   const { colorOverrides, updateColor } = useExperimentVisibility();
 
   const [session, setSession] = useState<Session | null>(null);
-  const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [activeTab, setActiveTab] = useState<
     "charts" | "training" | "logs" | "metadata" | "workflow"
   >("charts");
@@ -255,25 +224,9 @@ export const TrainingRunDetail: React.FC = () => {
     }
   }, [sessionId]);
 
-  const fetchEpisodes = useCallback(async () => {
-    try {
-      const response = await apiFetch(
-        `/api/episodes?session_id=${sessionId}`
-      );
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      const data = await response.json();
-      setEpisodes(data);
-    } catch (err: any) {
-      console.error("Error fetching episodes:", err);
-    }
-  }, [sessionId]);
-
   useEffect(() => {
     if (sessionId) {
       fetchSessionDetails();
-      fetchEpisodes();
       // Load most recent chat session
       apiFetch(`/api/agent/sessions?session_id=${sessionId}`)
         .then((r) => r.ok ? r.json() : [])
@@ -286,9 +239,7 @@ export const TrainingRunDetail: React.FC = () => {
         })
         .catch(() => setActiveChatSessionId(null));
     }
-  }, [sessionId, fetchSessionDetails, fetchEpisodes]);
-
-  usePolling(fetchEpisodes, { interval: 5000, enabled: !!sessionId && isRunning });
+  }, [sessionId, fetchSessionDetails]);
 
   useEffect(() => {
     if (metrics.length > 0 && selectedMetrics.length === 0) {
@@ -687,7 +638,6 @@ export const TrainingRunDetail: React.FC = () => {
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
                 <EpisodePanel
-                  episodes={episodes}
                   selectedStep={selectedStep}
                   sessionId={sessionId}
                   viewMode={episodeViewMode}

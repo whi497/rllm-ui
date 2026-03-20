@@ -35,17 +35,49 @@ async def create_episode(request: Request, user: CurrentUser):
     return store.get_episode(episode.episode_id)
 
 
-@router.get("/episodes", response_model=list[EpisodeResponse])
-def get_episodes(request: Request, user: CurrentUser, session_id: str = Query(..., description="Filter episodes by session ID")):
-    """Query episodes by session ID."""
-    store = request.app.state.store
+@router.post("/episodes/batch")
+async def batch_create_episodes(request: Request, user: CurrentUser):
+    """Receive a batch of episodes in a single request."""
+    body = await request.json()
+    session_id = body.get("session_id")
+    episodes_data = body.get("episodes", [])
 
-    # Check session
+    store = request.app.state.store
     session = store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    return store.get_episodes(session_id)
+    for ep_body in episodes_data:
+        session_type = ep_body.get("session_type", "training")
+        if session_type == "eval":
+            episode = Episode(**ep_body)
+            step_model = Step
+        else:
+            episode = AgentEpisode(**ep_body)
+            step_model = AgentStep
+
+        episode_data = episode.model_dump(mode="json")
+        search_text = extract_searchable_text(episode_data, step_model)
+        store.append_episode(episode.session_id, episode_data, search_text=search_text)
+
+    return {"status": "ok", "count": len(episodes_data)}
+
+
+@router.get("/episodes", response_model=list[EpisodeResponse])
+def get_episodes(
+    request: Request,
+    user: CurrentUser,
+    session_id: str = Query(..., description="Filter episodes by session ID"),
+    step: int | None = Query(None, description="Optional step filter"),
+):
+    """Query episodes by session ID, optionally filtered by step."""
+    store = request.app.state.store
+
+    session = store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return store.get_episodes(session_id, step=step)
 
 
 @router.get("/episodes/search", response_model=EpisodeSearchResponse)

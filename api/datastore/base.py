@@ -203,8 +203,8 @@ class DataStore(ABC):
         pass
 
     @abstractmethod
-    def get_episodes(self, session_id: str) -> list[dict[str, Any]]:
-        """Retrieve episodes for a session."""
+    def get_episodes(self, session_id: str, step: int | None = None) -> list[dict[str, Any]]:
+        """Retrieve episodes for a session, optionally filtered by step."""
         pass
 
     @abstractmethod

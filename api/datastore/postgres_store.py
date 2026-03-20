@@ -965,14 +965,20 @@ class PostgresStore(DataStore):
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
 
-    def get_episodes(self, session_id: str) -> list[dict[str, Any]]:
-        """Retrieve episodes for a session."""
+    def get_episodes(self, session_id: str, step: int | None = None) -> list[dict[str, Any]]:
+        """Retrieve episodes for a session, optionally filtered by step."""
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    "SELECT * FROM episodes WHERE session_id = %s ORDER BY step",
-                    (session_id,),
-                )
+                if step is not None:
+                    cursor.execute(
+                        "SELECT * FROM episodes WHERE session_id = %s AND step = %s ORDER BY step",
+                        (session_id, step),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT * FROM episodes WHERE session_id = %s ORDER BY step",
+                        (session_id,),
+                    )
                 rows = cursor.fetchall()
                 results = []
                 for row in rows:
