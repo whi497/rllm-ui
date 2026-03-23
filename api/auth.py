@@ -23,6 +23,16 @@ JWT_EXPIRY_HOURS = 168
 COOKIE_NAME = "rllm_session"
 API_KEY_HEADER = "X-API-Key"
 
+# Synthetic user for local-dev one-click login (never hits the DB).
+LOCAL_DEV_USER: dict = {
+    "id": "local-dev-user",
+    "email": "local@localhost",
+    "name": "Local Developer",
+    "api_key": None,
+    "team": None,
+    "is_superuser": False,
+}
+
 # ── Team / org ───────────────────────────────────────────────────
 
 #: Map email domains to team display names.
@@ -73,7 +83,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 # ── JWT ───────────────────────────────────────────────────────────
 
-def create_jwt(user_id: str, email: str, *, impersonator_id: str | None = None) -> str:
+def create_jwt(user_id: str, email: str, *, impersonator_id: str | None = None, local_dev: bool = False) -> str:
     payload = {
         "sub": user_id,
         "email": email,
@@ -82,6 +92,8 @@ def create_jwt(user_id: str, email: str, *, impersonator_id: str | None = None) 
     }
     if impersonator_id:
         payload["impersonator"] = impersonator_id
+    if local_dev:
+        payload["local_dev"] = True
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
@@ -126,6 +138,9 @@ async def get_current_user(request: Request) -> dict:
     if token:
         payload = decode_jwt(token)
         if payload:
+            # Local dev login — return synthetic user without DB lookup
+            if payload.get("local_dev") and DEPLOYMENT_MODE == "local":
+                return dict(LOCAL_DEV_USER)
             user = store.get_user_by_id(payload["sub"])
             if user:
                 # Attach impersonator info if present

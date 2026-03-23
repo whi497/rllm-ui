@@ -22,7 +22,7 @@ const GoogleIcon = () => (
 );
 
 export const LoginPage: React.FC = () => {
-  const { login, register, config } = useAuth();
+  const { login, register, localDevLogin, config } = useAuth();
   const router = useRouter();
   const oauthProviders = config?.oauth_providers ?? [];
   const [isRegister, setIsRegister] = useState(false);
@@ -42,6 +42,18 @@ export const LoginPage: React.FC = () => {
       ? await register(email, password, name || undefined)
       : await login(email, password);
 
+    setLoading(false);
+    if (result) {
+      setError(result);
+    } else {
+      router.push("/observability");
+    }
+  };
+
+  const handleLocalDevLogin = async () => {
+    setError(null);
+    setLoading(true);
+    const result = await localDevLogin();
     setLoading(false);
     if (result) {
       setError(result);
@@ -177,6 +189,29 @@ export const LoginPage: React.FC = () => {
               {loading ? "Loading..." : isRegister ? "Create account" : "Sign in"}
             </button>
           </form>
+
+          {/* Local dev quick login — shown only when BigQuery is configured */}
+          {config?.local_dev_login && (
+            <>
+              <div className="relative my-4">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-200" />
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="bg-white px-2 text-gray-400">or</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleLocalDevLogin}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-gray-900 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Continue as local user
+              </button>
+            </>
+          )}
 
           <div className="mt-4 text-center">
             <button

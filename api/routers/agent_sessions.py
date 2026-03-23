@@ -12,7 +12,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from auth import CurrentUser
+import local_settings
+from auth import DEPLOYMENT_MODE, CurrentUser
+from encryption import decrypt_value
 from fastapi import APIRouter, HTTPException, Query, Request
 
 logger = logging.getLogger(__name__)
@@ -52,13 +54,62 @@ def _get_clickhouse(request: Request):
     return ch
 
 
-def _get_bigquery(request: Request):
-    """Extract the BigQuery client from app state, lazily initializing if needed."""
+def _get_user_bq_settings(request: Request, user: dict) -> tuple[str | None, str | None]:
+    """Return (bq_project, bq_dataset) from user settings, or (None, None)."""
+    try:
+        store = request.app.state.store
+        encrypted = store.get_user_settings(user["id"])
+        project = decrypt_value(encrypted["bq_project"]) if "bq_project" in encrypted else None
+        dataset = decrypt_value(encrypted["bq_dataset"]) if "bq_dataset" in encrypted else None
+        return project, dataset
+    except Exception:
+        return None, None
+
+
+def _get_bigquery(request: Request, user: dict | None = None):
+    """Extract the BigQuery client, preferring user/local settings over global config."""
+    from datastore.bigquery_client import BigQueryClient
+
+    # In local mode, use local_settings JSON as the source of truth
+    if DEPLOYMENT_MODE == "local":
+        project = local_settings.get("bq_project")
+        if project:
+            dataset = local_settings.get("bq_dataset") or "agent_traces"
+            table = local_settings.get("bq_table") or "rllm_traces"
+            # Re-use cached client if config hasn't changed
+            bq = getattr(request.app.state, "bigquery", None)
+            if bq and bq._project == project and bq._dataset == dataset and bq._table == table:
+                return bq
+            try:
+                bq = BigQueryClient(project=project, dataset=dataset, table=table)
+                request.app.state.bigquery = bq
+                return bq
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Failed to initialize BigQuery client: {exc}",
+                ) from exc
+        raise HTTPException(
+            status_code=503,
+            detail="BigQuery not configured. Go to Settings to set your GCP project.",
+        )
+
+    # Cloud mode: check per-user BQ settings first
+    if user:
+        project, dataset = _get_user_bq_settings(request, user)
+        if project:
+            try:
+                return BigQueryClient(project=project, dataset=dataset or None)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Failed to initialize BigQuery client with your settings: {exc}",
+                ) from exc
+
+    # Fall back to global BigQuery client
     bq = getattr(request.app.state, "bigquery", None)
     if bq is None:
         try:
-            from datastore.bigquery_client import BigQueryClient
-
             bq = BigQueryClient()
             request.app.state.bigquery = bq
         except Exception as exc:
@@ -80,12 +131,10 @@ def _get_postgres_spans(request: Request):
     return pg
 
 
-def _get_client(request: Request, source: DataSource):
+def _get_client(request: Request, source: DataSource, user: dict | None = None):
     """Get the appropriate data source client."""
     if source == "bigquery":
-        # BigQuery is temporarily disabled — not yet migrated to user-aware queries.
-        raise HTTPException(status_code=503, detail="BigQuery source coming soon.")
-        # return _get_bigquery(request)
+        return _get_bigquery(request, user=user)
     if source == "postgres":
         return _get_postgres_spans(request)
     return _get_clickhouse(request)
@@ -102,9 +151,16 @@ def get_available_sources(request: Request, user: CurrentUser):
     sources = []
     if getattr(request.app.state, "clickhouse", None) is not None:
         sources.append("clickhouse")
-    # BigQuery temporarily disabled — not yet migrated to user-aware queries.
-    # if getattr(request.app.state, "bigquery", None) is not None:
-    #     sources.append("bigquery")
+    # BigQuery available via global config OR user settings
+    # BigQuery: check local settings (local mode), global config, or per-user settings
+    if getattr(request.app.state, "bigquery", None) is not None:
+        sources.append("bigquery")
+    elif DEPLOYMENT_MODE == "local" and local_settings.get("bq_project"):
+        sources.append("bigquery")
+    elif user:
+        project, _ = _get_user_bq_settings(request, user)
+        if project:
+            sources.append("bigquery")
     if getattr(request.app.state, "postgres_spans", None) is not None:
         sources.append("postgres")
     return {"sources": sources}
@@ -142,12 +198,8 @@ def delete_all_data(
             raise HTTPException(status_code=503, detail="PostgreSQL span store not configured.")
         deleted.update(pg.delete_all(user_id=uid))
     elif source == "bigquery":
-        # BigQuery temporarily disabled — not yet migrated to user-aware queries.
-        raise HTTPException(status_code=503, detail="BigQuery source coming soon.")
-        # bq = getattr(request.app.state, "bigquery", None)
-        # if bq is None:
-        #     raise HTTPException(status_code=503, detail="BigQuery not configured.")
-        # deleted.update(bq.delete_all())
+        # BigQuery delete is disabled — BQ data is shared/read-only.
+        raise HTTPException(status_code=400, detail="Cannot delete BigQuery data from the UI. BigQuery is a read-only source.")
     else:
         raise HTTPException(status_code=400, detail=f"Unknown source: {source}")
 
@@ -175,13 +227,21 @@ def get_dashboard(
     source: DataSource = "clickhouse",
 ):
     """Get aggregate dashboard metrics across the user's sessions."""
-    client = _get_client(request, source)
+    client = _get_client(request, source, user=user)
     uid = user["id"]
     stats = client.get_dashboard_stats(days, user_id=uid)
     timeseries = client.get_span_timeseries(days, user_id=uid)
     models = client.get_top_models(days, user_id=uid)
     tools = client.get_top_tools(days, user_id=uid)
-    sessions = client.get_session_count(days, user_id=uid)
+
+    # BigQuery includes total_sessions in the stats query to avoid a
+    # redundant full-table scan; other backends use a separate call.
+    if "total_sessions" in stats:
+        total = stats.pop("total_sessions")
+        sessions = {"total": total, "running": 0, "completed": total, "failed": 0}
+    else:
+        sessions = client.get_session_count(days, user_id=uid)
+
     return DashboardResponse(
         stats=DashboardStats(**stats) if stats else DashboardStats(),
         timeseries=[TimeseriesBucket(**b) for b in timeseries],
@@ -203,7 +263,7 @@ def get_span_activity(
     source: DataSource = "clickhouse",
 ):
     """Daily span counts over the full stored time range."""
-    client = _get_client(request, source)
+    client = _get_client(request, source, user=user)
     buckets = client.get_span_activity(user_id=user["id"])
     return SpanActivityResponse(
         buckets=[SpanActivityBucket(**b) for b in buckets],
@@ -240,7 +300,7 @@ def list_agent_sessions(
     offset: int = Query(0, ge=0),
 ):
     """List agent sessions with pagination."""
-    client = _get_client(request, source)
+    client = _get_client(request, source, user=user)
     uid = user["id"]
     rows = client.get_agent_sessions(limit=limit, offset=offset, user_id=uid)
     total = client.count_agent_sessions(user_id=uid)
@@ -260,7 +320,7 @@ def get_agent_session(
     source: DataSource = "clickhouse",
 ):
     """Get a single agent session."""
-    client = _get_client(request, source)
+    client = _get_client(request, source, user=user)
     row = client.get_agent_session(session_id, user_id=user["id"])
     if row is None:
         raise HTTPException(status_code=404, detail="Agent session not found")
@@ -318,7 +378,7 @@ def get_spans(
     offset: int = Query(0, ge=0),
 ):
     """Get spans for a session with pagination."""
-    client = _get_client(request, source)
+    client = _get_client(request, source, user=user)
     # Verify session ownership
     session = client.get_agent_session(session_id, user_id=user["id"])
     if session is None:
@@ -345,7 +405,7 @@ def get_spans_by_invocation(
     source: DataSource = "clickhouse",
 ):
     """Get all spans for a specific invocation within a session."""
-    client = _get_client(request, source)
+    client = _get_client(request, source, user=user)
     session = client.get_agent_session(session_id, user_id=user["id"])
     if session is None:
         raise HTTPException(status_code=404, detail="Agent session not found")
@@ -365,7 +425,7 @@ def get_span(
     source: DataSource = "clickhouse",
 ):
     """Get all rows for a specific span."""
-    client = _get_client(request, source)
+    client = _get_client(request, source, user=user)
     session = client.get_agent_session(session_id, user_id=user["id"])
     if session is None:
         raise HTTPException(status_code=404, detail="Agent session not found")

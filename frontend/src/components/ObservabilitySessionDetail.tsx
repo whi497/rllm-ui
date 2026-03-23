@@ -860,23 +860,25 @@ export const ObservabilitySessionDetail: React.FC<{ sessionId: string }> = ({
             }))
         );
       }
-      // Fetch skills distilled from this session
-      try {
-        const skillsResp = await apiFetch(`/api/skills?session_id=${sessionId}`);
-        if (skillsResp.ok) {
-          const skills = await skillsResp.json();
-          setSessionSkills(
-            skills.map((s: any) => ({
-              id: s.id,
-              title: s.title,
-              category: s.category,
-              reward_delta: s.reward_delta || 0,
-              confidence: s.confidence || 0,
-            }))
-          );
+      // Fetch skills distilled from this session (not available for BigQuery source)
+      if (dataSource !== "bigquery") {
+        try {
+          const skillsResp = await apiFetch(`/api/skills?session_id=${sessionId}`);
+          if (skillsResp.ok) {
+            const skills = await skillsResp.json();
+            setSessionSkills(
+              skills.map((s: any) => ({
+                id: s.id,
+                title: s.title,
+                category: s.category,
+                reward_delta: s.reward_delta || 0,
+                confidence: s.confidence || 0,
+              }))
+            );
+          }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
       }
     } catch {
       // ignore
@@ -1070,9 +1072,16 @@ export const ObservabilitySessionDetail: React.FC<{ sessionId: string }> = ({
         )}
 
         {/* Eval + Skills panel */}
-        {(evalRows.length > 0 || sessionSkills.length > 0) && (
+        {(evalRows.length > 0 || sessionSkills.length > 0 || dataSource === "bigquery") && (
           <div className="w-[320px] flex-shrink-0 border-l border-gray-200 bg-white overflow-auto">
             <div className="p-4">
+              {/* Skills not available for BigQuery */}
+              {dataSource === "bigquery" && sessionSkills.length === 0 && (
+                <div className="mb-5">
+                  <h2 className="text-xs font-semibold text-gray-900 uppercase tracking-wide mb-3">Distilled Skills</h2>
+                  <p className="text-xs text-gray-400">Skill distillation is not available for BigQuery data sources.</p>
+                </div>
+              )}
               {/* Distilled skills section */}
               {sessionSkills.length > 0 && (
                 <div className="mb-5">

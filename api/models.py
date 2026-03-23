@@ -282,6 +282,7 @@ class AuthConfigResponse(BaseModel):
     auth_required: bool
     deployment_mode: str
     oauth_providers: list[str] = []
+    local_dev_login: bool = False
 
 
 # Eval models

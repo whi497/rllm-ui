@@ -2,11 +2,13 @@
 
 import os
 
+import local_settings
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from auth import (
     COOKIE_NAME,
     DEPLOYMENT_MODE,
+    LOCAL_DEV_USER,
     SECURE_COOKIES,
     CurrentUser,
     create_jwt,
@@ -46,7 +48,8 @@ def get_auth_config():
         providers.append("github")
     if os.environ.get("GOOGLE_CLIENT_ID"):
         providers.append("google")
-    return AuthConfigResponse(auth_required=True, deployment_mode=DEPLOYMENT_MODE, oauth_providers=providers)
+    local_dev_login = DEPLOYMENT_MODE == "local"
+    return AuthConfigResponse(auth_required=True, deployment_mode=DEPLOYMENT_MODE, oauth_providers=providers, local_dev_login=local_dev_login)
 
 
 @router.post("/register", response_model=UserResponse)
@@ -91,6 +94,29 @@ def register(request: Request, response: Response, body: RegisterRequest):
     )
 
     return _user_response(user)
+
+
+@router.post("/local-dev-login", response_model=UserResponse)
+def local_dev_login(request: Request, response: Response):
+    """One-click login for local development.
+
+    Creates a default local user on first call, then logs them in.
+    Only available when DEPLOYMENT_MODE is "local".
+    """
+    if DEPLOYMENT_MODE != "local":
+        raise HTTPException(status_code=403, detail="Local dev login is only available in local mode")
+
+    token = create_jwt(LOCAL_DEV_USER["id"], LOCAL_DEV_USER["email"], local_dev=True)
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=SECURE_COOKIES,
+        samesite="lax",
+        max_age=72 * 3600,
+    )
+
+    return _user_response(LOCAL_DEV_USER)
 
 
 @router.post("/login", response_model=UserResponse)

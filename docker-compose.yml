@@ -1,0 +1,27 @@
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    volumes:
+      - rllm-data:/app/data
+    env_file: .env
+    environment:
+      - SQLITE_PATH=/app/data/rllm_ui.db
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://api:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  rllm-data:

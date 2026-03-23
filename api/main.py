@@ -88,20 +88,24 @@ async def lifespan(app: FastAPI):
         app.state.postgres_spans = None
         logger.info("PostgreSQL span client not initialized (no PostgreSQL DATABASE_URL)")
 
-    # Initialize BigQuery client (optional — only if configured)
-    bq_project = os.environ.get("BQ_PROJECT")
+    # Initialize BigQuery client (optional — from env or local_settings file)
+    import local_settings as _ls
+
+    bq_project = os.environ.get("BQ_PROJECT") or _ls.get("bq_project")
     if bq_project:
         try:
             from datastore.bigquery_client import BigQueryClient
 
-            app.state.bigquery = BigQueryClient()
+            bq_dataset = _ls.get("bq_dataset")
+            bq_table = _ls.get("bq_table")
+            app.state.bigquery = BigQueryClient(project=bq_project, dataset=bq_dataset, table=bq_table)
             logger.info("BigQuery connected for agent trace reading")
         except Exception as e:
             logger.warning(f"Failed to connect to BigQuery: {e}")
             app.state.bigquery = None
     else:
         app.state.bigquery = None
-        logger.info("BQ_PROJECT not set, BigQuery trace features disabled")
+        logger.info("BigQuery not configured (set via Settings page or BQ_PROJECT env)")
 
     # Initialize job manager
     from jobs import JobManager

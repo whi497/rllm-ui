@@ -70,10 +70,15 @@ def _nvl(value: Any, default: Any = 0) -> Any:
 class BigQueryClient:
     """Read-only BigQuery client for agent trace data."""
 
-    def __init__(self) -> None:
-        self._project = os.environ.get("BQ_PROJECT")  # None → default from ADC
-        self._dataset = os.environ.get("BQ_DATASET", "agent_traces")
-        self._table = os.environ.get("BQ_TABLE", "rllm_traces")
+    def __init__(
+        self,
+        project: str | None = None,
+        dataset: str | None = None,
+        table: str | None = None,
+    ) -> None:
+        self._project = project or os.environ.get("BQ_PROJECT")  # None → default from ADC
+        self._dataset = dataset or os.environ.get("BQ_DATASET", "agent_traces")
+        self._table = table or os.environ.get("BQ_TABLE", "rllm_traces")
         self.client = bigquery.Client(project=self._project)
         # Resolve project from ADC if not explicitly set
         if not self._project:
@@ -310,10 +315,15 @@ class BigQueryClient:
     # ------------------------------------------------------------------
 
     def get_dashboard_stats(self, days: int = 7, user_id: str | None = None) -> dict[str, Any]:
-        """Aggregate statistics across all spans within the time window."""
+        """Aggregate statistics across all spans within the time window.
+
+        Includes session count in the same scan to avoid a redundant
+        full-table query via get_session_count().
+        """
         sql = f"""
             SELECT
                 COUNT(*) AS total_spans,
+                COUNT(DISTINCT session_id) AS total_sessions,
                 COUNTIF(span_type = 'llm.end') AS llm_calls,
                 COUNTIF(span_type = 'tool.end') AS tool_calls,
                 COUNTIF(span_type = 'invocation.start') AS invocations,

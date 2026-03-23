@@ -26,6 +26,10 @@ api/pgdata/
 # Hydra outputs
 outputs/
 
+# Docker data
+data/
+docker-compose.override.yml
+
 # Coding assistant related
 CLAUDE.md
 .claude/

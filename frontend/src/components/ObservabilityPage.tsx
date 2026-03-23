@@ -89,9 +89,119 @@ const RefreshIcon: React.FC<{ size?: number; className?: string }> = ({ size = 1
   </svg>
 );
 
+/* ─── Inline BigQuery setup form ──────────────────────────────── */
+
+interface BqConfig {
+  project: string;
+  dataset: string;
+  table: string;
+}
+
+const BigQuerySetup: React.FC<{
+  onConfigured: () => void;
+  onDismiss?: () => void;
+  initial?: BqConfig | null;
+}> = ({ onConfigured, onDismiss, initial }) => {
+  const [project, setProject] = useState(initial?.project ?? "");
+  const [dataset, setDataset] = useState(initial?.dataset ?? "");
+  const [table, setTable] = useState(initial?.table ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const saveSetting = async (key: string, value: string) => {
+    const res = await apiFetch(`/api/settings/${key}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    });
+    return res.ok;
+  };
+
+  const handleSave = async () => {
+    if (!project.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      if (!(await saveSetting("bq_project", project.trim()))) { setError("Failed to save project."); return; }
+      if (dataset.trim() && !(await saveSetting("bq_dataset", dataset.trim()))) { setError("Failed to save dataset."); return; }
+      if (table.trim() && !(await saveSetting("bq_table", table.trim()))) { setError("Failed to save table."); return; }
+      onConfigured();
+    } catch {
+      setError("Network error.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-8 max-w-md mx-auto mt-12 relative">
+      {onDismiss && (
+        <button
+          onClick={onDismiss}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+          title="Dismiss"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      )}
+      <div className="flex items-center gap-2 mb-1">
+        <DatabaseIcon size={18} className="text-gray-400" />
+        <h3 className="text-base font-semibold text-gray-900">{initial?.project ? "Update BigQuery Connection" : "Connect BigQuery"}</h3>
+      </div>
+      <p className="text-sm text-gray-500 mb-5">
+        Enter your GCP project, dataset, and table to read agent traces.
+      </p>
+      <div className="space-y-3">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">GCP Project</label>
+          <input
+            type="text"
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+            placeholder="my-gcp-project"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Dataset</label>
+          <input
+            type="text"
+            value={dataset}
+            onChange={(e) => setDataset(e.target.value)}
+            placeholder="agent_traces"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400"
+          />
+          <p className="mt-1 text-xs text-gray-400">Defaults to &quot;agent_traces&quot; if left blank.</p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Table</label>
+          <input
+            type="text"
+            value={table}
+            onChange={(e) => setTable(e.target.value)}
+            placeholder="rllm_traces"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-gray-400"
+          />
+          <p className="mt-1 text-xs text-gray-400">Defaults to &quot;rllm_traces&quot; if left blank.</p>
+        </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <button
+          onClick={handleSave}
+          disabled={saving || !project.trim()}
+          className="w-full py-2 px-4 bg-black hover:bg-gray-800 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {saving ? "Connecting..." : "Connect"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const PAGE_SIZE = 20;
 
-const ENABLED_SOURCES: DataSource[] = ["postgres", "clickhouse"]; // bigquery temporarily disabled
+const ENABLED_SOURCES: DataSource[] = ["postgres", "clickhouse", "bigquery"];
 const VALID_SOURCES: DataSource[] = ["postgres", "clickhouse", "bigquery"];
 const VALID_VIEWS: ViewMode[] = ["dashboard", "sessions"];
 
@@ -118,6 +228,28 @@ export const ObservabilityPage: React.FC = () => {
   const initialLoadDone = useRef(false);
   const [deleteConfirmSource, setDeleteConfirmSource] = useState<DataSource | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [bqNeedsSetup, setBqNeedsSetup] = useState(false);
+  const [bqConfig, setBqConfig] = useState<{ project: string; dataset: string; table: string } | null>(null);
+
+  // Fetch BQ config when BigQuery is selected
+  useEffect(() => {
+    if (dataSource !== "bigquery") { setBqConfig(null); return; }
+    (async () => {
+      try {
+        const res = await apiFetch("/api/settings");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.bq_project) {
+            setBqConfig({
+              project: data.bq_project,
+              dataset: data.bq_dataset || "agent_traces",
+              table: data.bq_table || "rllm_traces",
+            });
+          }
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [dataSource, bqNeedsSetup]);
 
   // Keep URL in sync (replaceState to avoid polluting history)
   useEffect(() => {
@@ -138,6 +270,12 @@ export const ObservabilityPage: React.FC = () => {
         `/api/agent-sessions?source=${dataSource}&limit=${PAGE_SIZE}&offset=${offset}`
       );
       if (!resp.ok) {
+        if (resp.status === 503 && dataSource === "bigquery") {
+          setBqNeedsSetup(true);
+          setSessions([]);
+          setTotalSessions(0);
+          return;
+        }
         if (resp.status === 503) {
           setSessions([]);
           setTotalSessions(0);
@@ -145,6 +283,7 @@ export const ObservabilityPage: React.FC = () => {
         }
         throw new Error("Failed to fetch agent sessions");
       }
+      if (dataSource === "bigquery") setBqNeedsSetup(false);
       const data: PaginatedSessions = await resp.json();
       setSessions(data.items);
       setTotalSessions(data.total);
@@ -179,6 +318,7 @@ export const ObservabilityPage: React.FC = () => {
     setPage(0);
     initialLoadDone.current = false;
     setLoading(true);
+    if (source !== "bigquery") setBqNeedsSetup(false);
   };
 
   const handleDeleteAll = async () => {
@@ -240,19 +380,14 @@ export const ObservabilityPage: React.FC = () => {
               {(["postgres", "clickhouse", "bigquery"] as const).map((src) => (
                 <button
                   key={src}
-                  onClick={() => src !== "bigquery" && handleSourceChange(src)}
-                  disabled={src === "bigquery"}
+                  onClick={() => handleSourceChange(src)}
                   className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                    src === "bigquery"
-                      ? "text-gray-300 cursor-not-allowed"
-                      : dataSource === src
-                        ? "bg-white text-gray-900 shadow-sm"
-                        : "text-gray-500 hover:text-gray-700"
+                    dataSource === src
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
                   }`}
-                  title={src === "bigquery" ? "Coming soon" : undefined}
                 >
                   {DATA_SOURCE_LABELS[src]}
-                  {src === "bigquery" && <span className="ml-1 text-[10px] text-gray-300">(coming soon)</span>}
                 </button>
               ))}
             </div>
@@ -299,7 +434,29 @@ export const ObservabilityPage: React.FC = () => {
           </div>
         </div>
 
-        {viewMode === "dashboard" ? (
+        {/* BigQuery connection info */}
+        {dataSource === "bigquery" && bqConfig && !bqNeedsSetup && (
+          <div className="mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg flex items-center gap-2 text-xs text-gray-500">
+            <DatabaseIcon size={12} className="text-gray-400 flex-shrink-0" />
+            <span className="font-mono">
+              {bqConfig.project}.{bqConfig.dataset}.{bqConfig.table}
+            </span>
+            <button
+              onClick={() => setBqNeedsSetup(true)}
+              className="ml-auto text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              Change
+            </button>
+          </div>
+        )}
+
+        {bqNeedsSetup && dataSource === "bigquery" ? (
+          <BigQuerySetup
+            initial={bqConfig}
+            onConfigured={() => { setBqNeedsSetup(false); fetchSessions(); }}
+            onDismiss={bqConfig ? () => setBqNeedsSetup(false) : undefined}
+          />
+        ) : viewMode === "dashboard" ? (
           <ObservabilityDashboard dataSource={dataSource} />
         ) : (
           <>

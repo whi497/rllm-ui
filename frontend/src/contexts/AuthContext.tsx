@@ -5,7 +5,9 @@ import { apiFetch } from "../config/api";
 
 interface AuthConfig {
   auth_required: boolean;
+  deployment_mode: string;
   oauth_providers: string[];
+  local_dev_login: boolean;
 }
 
 interface User {
@@ -26,6 +28,7 @@ interface AuthState {
   clearJustRegistered: () => void;
   login: (email: string, password: string) => Promise<string | null>;
   register: (email: string, password: string, name?: string) => Promise<string | null>;
+  localDevLogin: () => Promise<string | null>;
   logout: () => Promise<void>;
   impersonate: (userId: string) => Promise<string | null>;
   stopImpersonating: () => Promise<void>;
@@ -40,6 +43,7 @@ const AuthContext = createContext<AuthState>({
   clearJustRegistered: () => {},
   login: async () => null,
   register: async () => null,
+  localDevLogin: async () => null,
   logout: async () => {},
   impersonate: async () => null,
   stopImpersonating: async () => {},
@@ -63,7 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const init = async () => {
-      let cfg: AuthConfig = { auth_required: true, oauth_providers: [] };
+      let cfg: AuthConfig = { auth_required: true, deployment_mode: "local", oauth_providers: [], local_dev_login: false };
       let userData: User | null = null;
       let welcome = false;
 
@@ -142,6 +146,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const localDevLogin = useCallback(async (): Promise<string | null> => {
+    try {
+      const res = await apiFetch("/api/auth/local-dev-login", { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data);
+        return null;
+      }
+      const err = await res.json().catch(() => ({}));
+      return err.detail || `Local dev login failed (${res.status})`;
+    } catch {
+      return "Network error";
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await apiFetch("/api/auth/logout", { method: "POST" });
@@ -184,6 +203,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         clearJustRegistered,
         login,
         register,
+        localDevLogin,
         logout,
         impersonate,
         stopImpersonating,

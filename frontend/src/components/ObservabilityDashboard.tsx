@@ -449,7 +449,7 @@ export const ObservabilityDashboard: React.FC<{ dataSource?: string }> = ({ data
     if (!initialLoadDone.current) setLoading(true);
     try {
       const [dashResp, actResp] = await Promise.all([
-        apiFetch(`/api/agent-sessions/dashboard?days=7&source=${dataSource}`),
+        apiFetch(`/api/agent-sessions/dashboard?days=365&source=${dataSource}`),
         apiFetch(`/api/agent-sessions/span-activity?source=${dataSource}`),
       ]);
       if (!dashResp.ok) {

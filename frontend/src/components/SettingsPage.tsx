@@ -5,12 +5,13 @@ import { apiFetch } from "../config/api";
 import { useAuth } from "../contexts/AuthContext";
 import { WelcomeModal } from "./auth/WelcomeModal";
 import { ConfirmDialog } from "./ConfirmDialog";
-type Section = "account" | "api-key" | "agent";
+type Section = "account" | "api-key" | "agent" | "bigquery";
 
 const NAV_ITEMS: { id: Section; label: string }[] = [
   { id: "account", label: "Account" },
   { id: "api-key", label: "API Key" },
   { id: "agent", label: "Agent" },
+  { id: "bigquery", label: "BigQuery" },
 ];
 
 export const SettingsPage: React.FC = () => {
@@ -56,6 +57,7 @@ export const SettingsPage: React.FC = () => {
           {activeSection === "account" && <AccountSection />}
           {activeSection === "api-key" && <ApiKeySection />}
           {activeSection === "agent" && <AnthropicKeySection />}
+          {activeSection === "bigquery" && <BigQuerySection />}
         </div>
       </div>
     </div>
@@ -319,6 +321,224 @@ const AnthropicKeySection: React.FC = () => {
           )}
           {status === "removed" && (
             <p className="mt-2 text-sm text-gray-500">API key removed.</p>
+          )}
+          {status === "error" && (
+            <p className="mt-2 text-sm text-red-600">Something went wrong. Please try again.</p>
+          )}
+        </>
+      )}
+    </section>
+  );
+};
+
+/* ─── BigQuery Configuration Section ─────────────────────────────── */
+
+const BigQuerySection: React.FC = () => {
+  const [project, setProject] = useState("");
+  const [dataset, setDataset] = useState("");
+  const [table, setTable] = useState("");
+  const [savedProject, setSavedProject] = useState<string | null>(null);
+  const [savedDataset, setSavedDataset] = useState<string | null>(null);
+  const [savedTable, setSavedTable] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<"idle" | "saved" | "removed" | "error">("idle");
+  const [fetching, setFetching] = useState(true);
+
+  const fetchSettings = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/settings");
+      if (res.ok) {
+        const data = await res.json();
+        setSavedProject(data.bq_project || null);
+        setSavedDataset(data.bq_dataset || null);
+        setSavedTable(data.bq_table || null);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setFetching(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  const handleSave = async () => {
+    if (!project.trim()) return;
+    setLoading(true);
+    setStatus("idle");
+    try {
+      const projectRes = await apiFetch("/api/settings/bq_project", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: project.trim() }),
+      });
+      if (!projectRes.ok) {
+        setStatus("error");
+        return;
+      }
+      if (dataset.trim()) {
+        const datasetRes = await apiFetch("/api/settings/bq_dataset", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ value: dataset.trim() }),
+        });
+        if (!datasetRes.ok) {
+          setStatus("error");
+          return;
+        }
+      }
+      if (table.trim()) {
+        const tableRes = await apiFetch("/api/settings/bq_table", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ value: table.trim() }),
+        });
+        if (!tableRes.ok) {
+          setStatus("error");
+          return;
+        }
+      }
+      setStatus("saved");
+      setProject("");
+      setDataset("");
+      setTable("");
+      await fetchSettings();
+    } catch {
+      setStatus("error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    setLoading(true);
+    setStatus("idle");
+    try {
+      await apiFetch("/api/settings/bq_project", { method: "DELETE" });
+      await apiFetch("/api/settings/bq_dataset", { method: "DELETE" });
+      await apiFetch("/api/settings/bq_table", { method: "DELETE" });
+      setSavedProject(null);
+      setSavedDataset(null);
+      setSavedTable(null);
+      setStatus("removed");
+    } catch {
+      setStatus("error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-gray-900 mb-1">BigQuery</h2>
+      <p className="text-sm text-gray-500 mb-4">
+        Configure your GCP project and dataset to read agent traces from BigQuery.
+      </p>
+
+      {fetching ? (
+        <div className="text-sm text-gray-400">Loading...</div>
+      ) : (
+        <>
+          {savedProject && (
+            <div className="flex items-center gap-3 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="flex-1">
+                <p className="text-sm text-gray-600">
+                  <span className="font-medium">Project:</span>{" "}
+                  <span className="font-mono">{savedProject}</span>
+                </p>
+                {savedDataset && (
+                  <p className="text-sm text-gray-600 mt-1">
+                    <span className="font-medium">Dataset:</span>{" "}
+                    <span className="font-mono">{savedDataset}</span>
+                  </p>
+                )}
+                {savedTable && (
+                  <p className="text-sm text-gray-600 mt-1">
+                    <span className="font-medium">Table:</span>{" "}
+                    <span className="font-mono">{savedTable}</span>
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={handleRemove}
+                disabled={loading}
+                className="text-sm text-red-600 hover:text-red-700 font-medium disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                GCP Project
+              </label>
+              <input
+                type="text"
+                value={project}
+                onChange={(e) => {
+                  setProject(e.target.value);
+                  setStatus("idle");
+                }}
+                placeholder={savedProject ? "Enter new project to replace..." : "my-gcp-project"}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent placeholder-gray-400"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Dataset
+              </label>
+              <input
+                type="text"
+                value={dataset}
+                onChange={(e) => {
+                  setDataset(e.target.value);
+                  setStatus("idle");
+                }}
+                placeholder={savedDataset || "agent_traces"}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent placeholder-gray-400"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Defaults to &quot;agent_traces&quot; if left blank.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Table
+              </label>
+              <input
+                type="text"
+                value={table}
+                onChange={(e) => {
+                  setTable(e.target.value);
+                  setStatus("idle");
+                }}
+                placeholder={savedTable || "rllm_traces"}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent placeholder-gray-400"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Defaults to &quot;rllm_traces&quot; if left blank.
+              </p>
+            </div>
+            <button
+              onClick={handleSave}
+              disabled={loading || !project.trim()}
+              className="px-4 py-2 text-sm font-medium text-white bg-accent-600 rounded-lg hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {loading ? "Saving..." : savedProject ? "Update" : "Save"}
+            </button>
+          </div>
+
+          {status === "saved" && (
+            <p className="mt-2 text-sm text-green-600">
+              BigQuery configuration saved. Select &quot;BigQuery&quot; as your data source in the Observability page.
+            </p>
+          )}
+          {status === "removed" && (
+            <p className="mt-2 text-sm text-gray-500">BigQuery configuration removed.</p>
           )}
           {status === "error" && (
             <p className="mt-2 text-sm text-red-600">Something went wrong. Please try again.</p>

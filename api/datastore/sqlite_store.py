@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -23,7 +24,11 @@ sqlite3.register_converter("TIMESTAMP", _convert_timestamp)
 
 class SQLiteStore(DataStore):
     def __init__(self, db_path: str = "rllm_ui.db"):
-        self.db_path = Path(__file__).parent.parent / db_path
+        env_path = os.environ.get("SQLITE_PATH")
+        if env_path:
+            self.db_path = Path(env_path)
+        else:
+            self.db_path = Path(__file__).parent.parent / db_path
 
     @contextmanager
     def _get_conn(self):

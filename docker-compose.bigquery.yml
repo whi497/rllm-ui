@@ -1,0 +1,26 @@
+# BigQuery overlay — mounts GCP credentials into the API container.
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.bigquery.yml up
+#
+# Then configure your BQ project and dataset in the Settings page.
+#
+# ── Method 1: Application Default Credentials (recommended) ────
+#   Run on your host machine first:
+#     gcloud auth application-default login
+#   Then start normally — the gcloud config is mounted read-only.
+#
+# ── Method 2: Service account key file ─────────────────────────
+#   1. Comment out the Method 1 volume below.
+#   2. Uncomment the Method 2 volume.
+#   3. Set these in your .env:
+#        GOOGLE_APPLICATION_CREDENTIALS=/gcp/sa-key.json
+#        GCP_SA_KEY_PATH=./path/to/your/sa-key.json
+
+services:
+  api:
+    volumes:
+      # Method 1: ADC (default)
+      - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
+      # Method 2: Service account key — uncomment and set GCP_SA_KEY_PATH in .env
+      # - ${GCP_SA_KEY_PATH:-./sa-key.json}:/gcp/sa-key.json:ro
