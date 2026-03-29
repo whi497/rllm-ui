@@ -15,6 +15,12 @@ import {
   SearchIcon,
   PushPinIcon,
   ClipboardCheckIcon,
+  ActivityIcon,
+  ShieldCheckIcon,
+  SparklesIcon,
+  UploadIcon,
+  DatabaseIcon,
+  LayersIcon,
 } from "./icons";
 import { ActionMenu } from "./ActionMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -58,6 +64,14 @@ export const Sidebar: React.FC = () => {
 
   const isSettingsActive = pathname === "/settings";
   const isEvaluationActive = pathname.startsWith("/evaluation");
+  const isObservabilityActive = pathname.startsWith("/observability");
+  const isClustersActive = pathname.startsWith("/clusters");
+  const isSkillsActive = pathname.startsWith("/skills");
+  const isSpanImportActive = pathname.startsWith("/span-import");
+  const isEvalInputActive = pathname.startsWith("/eval-input");
+  const isAdminActive = pathname.startsWith("/admin");
+
+  const { user: authUser } = useAuth();
 
   // Are we on a project overview page?
   const projectOverviewMatch = useMemo(() => {
@@ -115,7 +129,7 @@ export const Sidebar: React.FC = () => {
 
   // Auto-collapse main sidebar when navigating away from home (project overview, run, or settings)
   useEffect(() => {
-    if (projectOverviewMatch || activeSessionId || isSettingsActive || isEvaluationActive) {
+    if (projectOverviewMatch || activeSessionId || isSettingsActive || isEvaluationActive || isObservabilityActive || isClustersActive || isSkillsActive || isSpanImportActive || isEvalInputActive || isAdminActive) {
       setIsCollapsed(true);
     } else {
       setIsCollapsed(false);
@@ -164,8 +178,8 @@ export const Sidebar: React.FC = () => {
       {/* Main sidebar */}
       <div
         style={{
-          width: isCollapsed ? "44px" : "160px",
-          minWidth: isCollapsed ? "44px" : "160px",
+          width: isCollapsed ? "44px" : "200px",
+          minWidth: isCollapsed ? "44px" : "200px",
           transition: "width 0.2s, min-width 0.2s",
         }}
         className="bg-white border-r border-gray-200 flex flex-col flex-shrink-0"
@@ -175,7 +189,7 @@ export const Sidebar: React.FC = () => {
           className={`h-14 flex items-center ${isCollapsed ? "justify-center px-1" : "justify-between pl-4 pr-2"}`}
         >
           {!isCollapsed && (
-            <Link href="/">
+            <Link href="/observability">
               <img
                 src="/rllm_logo_black.png"
                 alt="rLLM"
@@ -198,6 +212,105 @@ export const Sidebar: React.FC = () => {
 
         {/* Navigation */}
         <nav className="flex-1 py-2 px-2">
+          <Link
+            href="/observability"
+            className={`
+              flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
+              transition-colors duration-150
+              ${isCollapsed ? "justify-center" : ""}
+              ${
+                isObservabilityActive
+                  ? "bg-accent-50 text-accent-700"
+                  : "text-gray-600 hover:bg-layer-1 hover:text-gray-900"
+              }
+            `}
+            title={isCollapsed ? "Observability" : undefined}
+          >
+            <ActivityIcon size={18} className="flex-shrink-0" />
+            {!isCollapsed && <span>Observability</span>}
+          </Link>
+          <Link
+            href="/span-import"
+            className={`
+              flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
+              transition-colors duration-150
+              ${isCollapsed ? "justify-center" : ""}
+              ${
+                isSpanImportActive
+                  ? "bg-accent-50 text-accent-700"
+                  : "text-gray-600 hover:bg-layer-1 hover:text-gray-900"
+              }
+            `}
+            title={isCollapsed ? "Span Import" : undefined}
+          >
+            <DatabaseIcon size={18} className="flex-shrink-0" />
+            {!isCollapsed && (
+              <span className="flex items-center gap-1.5">
+                Span Import
+                <span className="px-1 py-0.5 text-[10px] font-semibold leading-none rounded bg-amber-100 text-amber-700">
+                  BETA
+                </span>
+              </span>
+            )}
+          </Link>
+          <Link
+            href="/eval-input"
+            className={`
+              flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
+              transition-colors duration-150
+              ${isCollapsed ? "justify-center" : ""}
+              ${
+                isEvalInputActive
+                  ? "bg-accent-50 text-accent-700"
+                  : "text-gray-600 hover:bg-layer-1 hover:text-gray-900"
+              }
+            `}
+            title={isCollapsed ? "Eval Import" : undefined}
+          >
+            <UploadIcon size={18} className="flex-shrink-0" />
+            {!isCollapsed && (
+              <span className="flex items-center gap-1.5">
+                Eval Import
+                <span className="px-1 py-0.5 text-[10px] font-semibold leading-none rounded bg-amber-100 text-amber-700">
+                  BETA
+                </span>
+              </span>
+            )}
+          </Link>
+          <Link
+            href="/clusters"
+            className={`
+              flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
+              transition-colors duration-150
+              ${isCollapsed ? "justify-center" : ""}
+              ${
+                isClustersActive
+                  ? "bg-accent-50 text-accent-700"
+                  : "text-gray-600 hover:bg-layer-1 hover:text-gray-900"
+              }
+            `}
+            title={isCollapsed ? "Clusters" : undefined}
+          >
+            <LayersIcon size={18} className="flex-shrink-0" />
+            {!isCollapsed && <span>Clusters</span>}
+          </Link>
+          <Link
+            href="/skills"
+            className={`
+              flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
+              transition-colors duration-150
+              ${isCollapsed ? "justify-center" : ""}
+              ${
+                isSkillsActive
+                  ? "bg-accent-50 text-accent-700"
+                  : "text-gray-600 hover:bg-layer-1 hover:text-gray-900"
+              }
+            `}
+            title={isCollapsed ? "Skills" : undefined}
+          >
+            <SparklesIcon size={18} className="flex-shrink-0" />
+            {!isCollapsed && <span>Skills</span>}
+          </Link>
           <Link
             href="/"
             className={`
@@ -249,6 +362,25 @@ export const Sidebar: React.FC = () => {
             <SettingsIcon size={18} className="flex-shrink-0" />
             {!isCollapsed && <span>Settings</span>}
           </Link>
+          {authUser?.is_superuser && (
+            <Link
+              href="/admin"
+              className={`
+                flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
+                transition-colors duration-150
+                ${isCollapsed ? "justify-center" : ""}
+                ${
+                  isAdminActive
+                    ? "bg-accent-50 text-accent-700"
+                    : "text-gray-600 hover:bg-layer-1 hover:text-gray-900"
+                }
+              `}
+              title={isCollapsed ? "Admin" : undefined}
+            >
+              <ShieldCheckIcon size={18} className="flex-shrink-0" />
+              {!isCollapsed && <span>Admin</span>}
+            </Link>
+          )}
           <a
             href="https://rllm-project.readthedocs.io/"
             target="_blank"
@@ -303,25 +435,48 @@ export const Sidebar: React.FC = () => {
 /* ─── User Menu (cloud mode only) ──────────────────────────────────── */
 
 const UserMenu: React.FC<{ isCollapsed: boolean }> = ({ isCollapsed }) => {
-  const { config, user } = useAuth();
+  const { config, user, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useClickOutside(menuRef, () => setOpen(false));
 
   if (!config?.auth_required || !user) return null;
 
   const initials = (user.name || user.email)[0].toUpperCase();
 
   return (
-    <div className="px-2 pb-2">
-      <div
-        className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm text-gray-600 ${isCollapsed ? "justify-center" : ""}`}
+    <div className="px-2 pb-2 relative" ref={menuRef}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition-colors ${isCollapsed ? "justify-center" : ""}`}
         title={isCollapsed ? user.email : undefined}
       >
         <span className="w-6 h-6 rounded-full bg-accent-100 text-accent-700 flex items-center justify-center text-xs font-medium flex-shrink-0">
           {initials}
         </span>
         {!isCollapsed && (
-          <span className="truncate text-xs">{user.email}</span>
+          <div className="flex flex-col min-w-0 text-left">
+            <span className="truncate text-xs">{user.email}</span>
+            {user.team && (
+              <span className="inline-flex items-center gap-1 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
+                <span className="text-[10px] font-medium text-gray-500 truncate">{user.team}</span>
+              </span>
+            )}
+          </div>
         )}
-      </div>
+      </button>
+      {open && (
+        <div className={`absolute ${isCollapsed ? "left-12" : "left-2 right-2"} bottom-full mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50`}>
+          <button
+            onClick={() => { setOpen(false); logout(); }}
+            className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            Log out
+          </button>
+        </div>
+      )}
     </div>
   );
 };

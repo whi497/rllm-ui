@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from auth import COOKIE_NAME, IS_CLOUD, create_jwt, generate_api_key
+from auth import COOKIE_NAME, SECURE_COOKIES, create_jwt, detect_team, generate_api_key, is_superuser_email
 
 router = APIRouter(prefix="/api/oauth", tags=["oauth"])
 
@@ -52,8 +52,6 @@ def _get_callback_url(request: Request, provider: str) -> str:
 @router.get("/github/authorize")
 def github_authorize(request: Request):
     """Redirect to GitHub's OAuth authorization page."""
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404, detail="OAuth not available in local mode")
     if not GITHUB_CLIENT_ID:
         raise HTTPException(status_code=500, detail="GitHub OAuth not configured")
 
@@ -73,7 +71,7 @@ def github_authorize(request: Request):
         key=OAUTH_STATE_COOKIE,
         value=state,
         httponly=True,
-        secure=True,
+        secure=SECURE_COOKIES,
         samesite="lax",
         max_age=600,
     )
@@ -83,9 +81,6 @@ def github_authorize(request: Request):
 @router.get("/github/callback")
 async def github_callback(request: Request, code: str = "", state: str = ""):
     """Handle GitHub OAuth callback."""
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404, detail="OAuth not available in local mode")
-
     # Validate state
     stored_state = request.cookies.get(OAUTH_STATE_COOKIE)
     if not stored_state or stored_state != state:
@@ -151,8 +146,6 @@ async def github_callback(request: Request, code: str = "", state: str = ""):
 @router.get("/google/authorize")
 def google_authorize(request: Request):
     """Redirect to Google's OAuth authorization page."""
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404, detail="OAuth not available in local mode")
     if not GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=500, detail="Google OAuth not configured")
 
@@ -173,7 +166,7 @@ def google_authorize(request: Request):
         key=OAUTH_STATE_COOKIE,
         value=state,
         httponly=True,
-        secure=True,
+        secure=SECURE_COOKIES,
         samesite="lax",
         max_age=600,
     )
@@ -183,9 +176,6 @@ def google_authorize(request: Request):
 @router.get("/google/callback")
 async def google_callback(request: Request, code: str = "", state: str = ""):
     """Handle Google OAuth callback."""
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404, detail="OAuth not available in local mode")
-
     # Validate state
     stored_state = request.cookies.get(OAUTH_STATE_COOKIE)
     if not stored_state or stored_state != state:
@@ -269,6 +259,16 @@ async def _find_or_create_user(
             )
             is_new = True
 
+    # Auto-assign team from email domain (on first login or if missing)
+    if not user.get("team"):
+        team = detect_team(email)
+        if team:
+            store.update_user_team(user["id"], team)
+
+    # Auto-set superuser flag based on SUPERUSER_EMAILS env var
+    if is_superuser_email(email) and not user.get("is_superuser"):
+        store.set_superuser(user["id"], True)
+
     token = create_jwt(user["id"], user["email"])
     redirect_url = f"{frontend_url}/?welcome=1" if is_new else frontend_url
 
@@ -277,7 +277,7 @@ async def _find_or_create_user(
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=True,
+        secure=SECURE_COOKIES,
         samesite="lax",
         max_age=72 * 3600,
     )

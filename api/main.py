@@ -12,10 +12,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+
 from datastore.factory import get_datastore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import agent, auth, episodes, eval_results, health, logs, metrics, oauth, sessions, settings, sse, trajectory_groups
+from routers import admin, agent, agent_sessions, auth, clusters, episodes, eval_results, eval_uploads, health, jobs, logs, metrics, oauth, sessions, settings, skills, span_uploads, sse, trajectory_groups
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +43,8 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Database connection attempt {attempt}/{max_retries} failed: {e}. Retrying in 3s...")
             time.sleep(3)
 
-    # Initialize global agent (local mode only — cloud mode uses per-user keys)
-    from auth import IS_CLOUD
-
-    if IS_CLOUD:
-        logger.info("Cloud mode: skipping global agent init (per-user keys only)")
-        app.state.agent = None
-    elif os.environ.get("ANTHROPIC_API_KEY"):
+    # Initialize global agent from ANTHROPIC_API_KEY (per-user keys take priority at request time)
+    if os.environ.get("ANTHROPIC_API_KEY"):
         try:
             from agent import ObservabilityAgent
 
@@ -56,6 +56,62 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("ANTHROPIC_API_KEY not set, Observability Agent disabled")
         app.state.agent = None
+
+    # Initialize ClickHouse client (optional — only if configured)
+    ch_host = os.environ.get("CLICKHOUSE_HOST")
+    if ch_host:
+        try:
+            from datastore.clickhouse_client import ClickHouseClient
+
+            app.state.clickhouse = ClickHouseClient()
+            app.state.clickhouse.init_tables()
+            logger.info("ClickHouse connected for agent trajectories")
+        except Exception as e:
+            logger.warning(f"Failed to connect to ClickHouse: {e}")
+            app.state.clickhouse = None
+    else:
+        app.state.clickhouse = None
+        logger.info("CLICKHOUSE_HOST not set, agent trajectory features disabled")
+
+    # Initialize PostgreSQL span client (always available if using Postgres)
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url and db_url.startswith("postgresql"):
+        try:
+            from datastore.postgres_span_store import PostgresSpanClient
+
+            app.state.postgres_spans = PostgresSpanClient(db_url)
+            logger.info("PostgreSQL span client initialized for imported agent traces")
+        except Exception as e:
+            logger.warning(f"Failed to initialize PostgreSQL span client: {e}")
+            app.state.postgres_spans = None
+    else:
+        app.state.postgres_spans = None
+        logger.info("PostgreSQL span client not initialized (no PostgreSQL DATABASE_URL)")
+
+    # Initialize BigQuery client (optional — from env or local_settings file)
+    import local_settings as _ls
+
+    bq_project = os.environ.get("BQ_PROJECT") or _ls.get("bq_project")
+    if bq_project:
+        try:
+            from datastore.bigquery_client import BigQueryClient
+
+            bq_dataset = _ls.get("bq_dataset")
+            bq_table = _ls.get("bq_table")
+            app.state.bigquery = BigQueryClient(project=bq_project, dataset=bq_dataset, table=bq_table)
+            logger.info("BigQuery connected for agent trace reading")
+        except Exception as e:
+            logger.warning(f"Failed to connect to BigQuery: {e}")
+            app.state.bigquery = None
+    else:
+        app.state.bigquery = None
+        logger.info("BigQuery not configured (set via Settings page or BQ_PROJECT env)")
+
+    # Initialize job manager
+    from jobs import JobManager
+
+    app.state.job_manager = JobManager(app.state.store)
+    app.state.job_manager.cleanup_dangling_jobs()
 
     # Start background crash detection loop
     async def crash_detection_loop():
@@ -73,8 +129,15 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    app.state.job_manager.cancel_all()
     crash_task.cancel()
     app.state.store.close()
+    if getattr(app.state, "postgres_spans", None):
+        app.state.postgres_spans.close()
+    if getattr(app.state, "clickhouse", None):
+        app.state.clickhouse.close()
+    if getattr(app.state, "bigquery", None):
+        app.state.bigquery.close()
 
 
 # Create FastAPI app
@@ -119,3 +182,10 @@ app.include_router(settings.router)
 app.include_router(logs.router)
 app.include_router(trajectory_groups.router)
 app.include_router(eval_results.router)
+app.include_router(eval_uploads.router)
+app.include_router(span_uploads.router)
+app.include_router(skills.router)
+app.include_router(agent_sessions.router)
+app.include_router(jobs.router)
+app.include_router(clusters.router)
+app.include_router(admin.router)

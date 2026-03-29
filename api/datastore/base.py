@@ -104,6 +104,21 @@ class DataStore(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_all_users(self) -> list[dict[str, Any]]:
+        """Return all users (admin only). Excludes password_hash."""
+        pass
+
+    @abstractmethod
+    def update_user_team(self, user_id: str, team: str | None) -> dict[str, Any] | None:
+        """Set a user's team. Returns updated user dict or None."""
+        pass
+
+    @abstractmethod
+    def set_superuser(self, user_id: str, is_superuser: bool) -> None:
+        """Set or clear the superuser flag on a user."""
+        pass
+
     # ── User settings methods (cloud mode only) ────────────────────
 
     @abstractmethod
@@ -319,50 +334,155 @@ class DataStore(ABC):
     # ── Chat session methods ─────────────────────────────────────────
 
     @abstractmethod
-    def create_chat_session(self, session_id: str, title: str = "New chat") -> dict[str, Any]:
+    def create_chat_session(self, session_id: str, title: str = "New chat", user_id: str | None = None) -> dict[str, Any]:
         """Create a new chat session for a training run. Returns the chat session dict."""
         pass
 
     @abstractmethod
-    def get_chat_sessions(self, session_id: str) -> list[dict[str, Any]]:
+    def get_chat_sessions(self, session_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
         """Get all chat sessions for a training run, ordered by updated_at desc."""
         pass
 
     @abstractmethod
-    def delete_chat_session(self, chat_session_id: str) -> bool:
+    def delete_chat_session(self, chat_session_id: str, user_id: str | None = None) -> bool:
         """Delete a chat session and its messages. Returns True if deleted."""
         pass
 
     @abstractmethod
-    def get_chat_messages(self, chat_session_id: str) -> list[dict[str, Any]]:
+    def get_chat_messages(self, chat_session_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
         """Get all messages for a chat session, ordered by created_at asc."""
         pass
 
     @abstractmethod
-    def append_chat_message(self, chat_session_id: str, role: str, content: str) -> dict[str, Any]:
+    def append_chat_message(self, chat_session_id: str, role: str, content: str, user_id: str | None = None) -> dict[str, Any]:
         """Append a message to a chat session. Updates the session's updated_at. Returns the message dict."""
         pass
 
     # ── Eval result methods ─────────────────────────────────────────
 
     @abstractmethod
-    def create_eval_result(self, data: dict[str, Any]) -> dict[str, Any]:
+    def create_eval_result(self, data: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
         """Store an eval result. Returns the created record."""
         pass
 
     @abstractmethod
-    def get_eval_results(self, session_id: str | None = None) -> list[dict[str, Any]]:
-        """Get eval results, optionally filtered by session_id."""
+    def get_eval_results(self, session_id: str | None = None, user_id: str | None = None) -> list[dict[str, Any]]:
+        """Get eval results, optionally filtered by session_id and/or user_id."""
         pass
 
     @abstractmethod
-    def get_eval_result(self, result_id: str) -> dict[str, Any] | None:
-        """Get a single eval result by ID."""
+    def get_eval_result(self, result_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        """Get a single eval result by ID, optionally scoped to user."""
         pass
 
     @abstractmethod
-    def get_eval_results_by_project(self, project_id: str) -> list[dict[str, Any]]:
+    def get_eval_results_by_project(self, project_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
         """Get all eval results for sessions in a project (for leaderboard grouping)."""
+        pass
+
+    # ── Skill methods ─────────────────────────────────────────────────
+
+    @abstractmethod
+    def create_skill(self, data: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
+        """Store a distilled skill. Returns the created record."""
+        pass
+
+    @abstractmethod
+    def get_skills(self, is_active: bool | None = None, category: str | None = None, user_id: str | None = None) -> list[dict[str, Any]]:
+        """Get skills, optionally filtered."""
+        pass
+
+    @abstractmethod
+    def get_skill(self, skill_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        """Get a single skill by ID."""
+        pass
+
+    @abstractmethod
+    def update_skill(self, skill_id: str, data: dict[str, Any], user_id: str | None = None) -> dict[str, Any] | None:
+        """Partial update a skill. Returns updated record or None."""
+        pass
+
+    @abstractmethod
+    def delete_skill(self, skill_id: str, user_id: str | None = None) -> bool:
+        """Delete a skill. Returns True if existed."""
+        pass
+
+    @abstractmethod
+    def delete_all_skills(self, user_id: str | None = None) -> int:
+        """Delete all skills. Returns count of deleted rows."""
+        pass
+
+    def delete_all_eval_results(self, user_id: str | None = None) -> int:
+        ...
+
+    def delete_all_eval_uploads(self, user_id: str | None = None) -> int:
+        ...
+
+    def delete_all_jobs(self, user_id: str | None = None) -> int:
+        ...
+
+    # ── Eval upload methods ────────────────────────────────────────────
+
+    @abstractmethod
+    def create_eval_upload(self, upload_id: str, filename: str, rows: list[dict[str, Any]], user_id: str | None = None) -> dict[str, Any]:
+        """Store an eval CSV upload (metadata + rows). Returns the upload metadata."""
+        pass
+
+    @abstractmethod
+    def get_eval_uploads(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        """List all eval uploads (metadata only), optionally scoped to user."""
+        pass
+
+    @abstractmethod
+    def get_eval_upload_rows(self, upload_id: str, user_id: str | None = None) -> list[dict[str, Any]] | None:
+        """Get all rows for an upload. Returns None if upload doesn't exist or not owned by user."""
+        pass
+
+    @abstractmethod
+    def delete_eval_upload(self, upload_id: str, user_id: str | None = None) -> bool:
+        """Delete an upload and its rows. Returns True if existed."""
+        pass
+
+    # ── Session cluster methods ───────────────────────────────────────
+
+    @abstractmethod
+    def create_cluster(self, data: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
+        """Create a session cluster. Returns the created cluster dict."""
+        pass
+
+    @abstractmethod
+    def get_clusters(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        """Get all clusters, optionally filtered by user."""
+        pass
+
+    @abstractmethod
+    def get_cluster(self, cluster_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        """Get a single cluster by ID, optionally scoped to user."""
+        pass
+
+    @abstractmethod
+    def get_cluster_members(self, cluster_id: str) -> list[dict[str, Any]]:
+        """Get all members of a cluster."""
+        pass
+
+    @abstractmethod
+    def add_cluster_member(self, cluster_id: str, session_id: str, labels: dict[str, Any], summary: str = "") -> dict[str, Any]:
+        """Add a session to a cluster. Returns the member record."""
+        pass
+
+    @abstractmethod
+    def update_cluster_metadata(self, cluster_id: str, metadata: dict[str, Any], description: str = "") -> None:
+        """Update cluster metadata and description."""
+        pass
+
+    @abstractmethod
+    def get_clusters_by_job(self, job_id: str) -> list[dict[str, Any]]:
+        """Get all clusters created by a given job."""
+        pass
+
+    @abstractmethod
+    def delete_all_clusters(self, user_id: str | None = None) -> int:
+        """Delete all clusters, optionally scoped to user. Returns count of deleted rows."""
         pass
 
     def close(self):

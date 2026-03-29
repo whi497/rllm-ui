@@ -10,18 +10,25 @@ api/rllm_ui.db
 api/*.db
 api/.venv/
 api/.pytest_cache/
+api/pgdata/
 
 # Python
 **/__pycache__/
 
 # Environment
 .env
+.env.local
+.env.prod
 
 # Build/cache
 .vite/
 
 # Hydra outputs
 outputs/
+
+# Docker data
+data/
+docker-compose.override.yml
 
 # Coding assistant related
 CLAUDE.md

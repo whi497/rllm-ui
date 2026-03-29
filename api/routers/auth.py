@@ -2,21 +2,38 @@
 
 import os
 
+import local_settings
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from auth import (
     COOKIE_NAME,
-    IS_CLOUD,
     DEPLOYMENT_MODE,
+    LOCAL_DEV_USER,
+    SECURE_COOKIES,
     CurrentUser,
     create_jwt,
+    detect_team,
     generate_api_key,
     hash_password,
+    is_superuser_email,
     verify_password,
 )
 from models import AuthConfigResponse, LoginRequest, RegisterRequest, UserResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _user_response(user: dict, *, impersonating: bool = False) -> UserResponse:
+    """Build a UserResponse from a user dict, including team/superuser fields."""
+    return UserResponse(
+        id=user["id"],
+        email=user["email"],
+        name=user.get("name"),
+        api_key=user.get("api_key"),
+        team=user.get("team"),
+        is_superuser=bool(user.get("is_superuser")),
+        impersonating=impersonating,
+    )
 
 
 @router.get("/config", response_model=AuthConfigResponse)
@@ -31,18 +48,13 @@ def get_auth_config():
         providers.append("github")
     if os.environ.get("GOOGLE_CLIENT_ID"):
         providers.append("google")
-    return AuthConfigResponse(auth_required=IS_CLOUD, deployment_mode=DEPLOYMENT_MODE, oauth_providers=providers)
+    local_dev_login = DEPLOYMENT_MODE == "local"
+    return AuthConfigResponse(auth_required=True, deployment_mode=DEPLOYMENT_MODE, oauth_providers=providers, local_dev_login=local_dev_login)
 
 
 @router.post("/register", response_model=UserResponse)
 def register(request: Request, response: Response, body: RegisterRequest):
-    """Create a new user account.
-
-    Only available in cloud mode. Sets an httpOnly session cookie.
-    """
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404, detail="Registration not available in local mode")
-
+    """Create a new user account. Sets an httpOnly session cookie."""
     store = request.app.state.store
 
     # Check if email already exists
@@ -64,18 +76,47 @@ def register(request: Request, response: Response, body: RegisterRequest):
         api_key=api_key,
     )
 
+    # Auto-assign team from email domain
+    team = detect_team(body.email)
+    if team:
+        store.update_user_team(user["id"], team)
+        user["team"] = team
+
     # Set session cookie
     token = create_jwt(user["id"], user["email"])
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=True,
+        secure=SECURE_COOKIES,
         samesite="lax",
         max_age=72 * 3600,
     )
 
-    return UserResponse(id=user["id"], email=user["email"], name=user.get("name"), api_key=user["api_key"])
+    return _user_response(user)
+
+
+@router.post("/local-dev-login", response_model=UserResponse)
+def local_dev_login(request: Request, response: Response):
+    """One-click login for local development.
+
+    Creates a default local user on first call, then logs them in.
+    Only available when DEPLOYMENT_MODE is "local".
+    """
+    if DEPLOYMENT_MODE != "local":
+        raise HTTPException(status_code=403, detail="Local dev login is only available in local mode")
+
+    token = create_jwt(LOCAL_DEV_USER["id"], LOCAL_DEV_USER["email"], local_dev=True)
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=SECURE_COOKIES,
+        samesite="lax",
+        max_age=72 * 3600,
+    )
+
+    return _user_response(LOCAL_DEV_USER)
 
 
 @router.post("/login", response_model=UserResponse)
@@ -84,9 +125,6 @@ def login(request: Request, response: Response, body: LoginRequest):
 
     Sets an httpOnly session cookie on success.
     """
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404, detail="Login not available in local mode")
-
     store = request.app.state.store
 
     user = store.get_user_by_email(body.email)
@@ -104,17 +142,24 @@ def login(request: Request, response: Response, body: LoginRequest):
     if not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    # Backfill team if missing
+    if not user.get("team"):
+        team = detect_team(user["email"])
+        if team:
+            store.update_user_team(user["id"], team)
+            user["team"] = team
+
     token = create_jwt(user["id"], user["email"])
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=True,
+        secure=SECURE_COOKIES,
         samesite="lax",
         max_age=72 * 3600,
     )
 
-    return UserResponse(id=user["id"], email=user["email"], name=user.get("name"), api_key=user["api_key"])
+    return _user_response(user)
 
 
 @router.post("/logout")
@@ -126,16 +171,7 @@ def logout(response: Response, user: CurrentUser):
 
 @router.post("/delete-account")
 def delete_account(request: Request, response: Response, user: CurrentUser):
-    """Delete the current user's account and all associated data.
-
-    Only available in cloud mode. Clears the session cookie.
-    """
-    if not IS_CLOUD:
-        raise HTTPException(status_code=404, detail="Not available in local mode")
-
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
+    """Delete the current user's account and all associated data. Clears the session cookie."""
     store = request.app.state.store
     store.delete_user(user["id"])
 
@@ -149,9 +185,6 @@ def regenerate_api_key(request: Request, user: CurrentUser):
 
     The new key is returned once and cannot be retrieved again.
     """
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
     store = request.app.state.store
     new_key = generate_api_key()
     updated = store.update_user_api_key(user["id"], new_key)
@@ -163,11 +196,6 @@ def regenerate_api_key(request: Request, user: CurrentUser):
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user_info(user: CurrentUser):
-    """Return the currently authenticated user's info + API key.
-
-    In local mode (user is None), returns a placeholder.
-    """
-    if user is None:
-        return UserResponse(id="local", email="local@localhost", name="Local User", api_key=None)
-
-    return UserResponse(id=user["id"], email=user["email"], name=user.get("name"), api_key=user.get("api_key"))
+    """Return the currently authenticated user's info + API key."""
+    impersonating = "impersonator_id" in user
+    return _user_response(user, impersonating=impersonating)

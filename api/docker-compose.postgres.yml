@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: rllm-postgres
+    environment:
+      POSTGRES_USER: rllm
+      POSTGRES_PASSWORD: rllm
+      POSTGRES_DB: rllm_ui
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    restart: unless-stopped

@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -23,7 +24,11 @@ sqlite3.register_converter("TIMESTAMP", _convert_timestamp)
 
 class SQLiteStore(DataStore):
     def __init__(self, db_path: str = "rllm_ui.db"):
-        self.db_path = Path(__file__).parent.parent / db_path
+        env_path = os.environ.get("SQLITE_PATH")
+        if env_path:
+            self.db_path = Path(env_path)
+        else:
+            self.db_path = Path(__file__).parent.parent / db_path
 
     @contextmanager
     def _get_conn(self):
@@ -183,6 +188,187 @@ class SQLiteStore(DataStore):
                 )
             """)
 
+            # Skills table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS skills (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    category TEXT DEFAULT 'general',
+                    confidence REAL DEFAULT 0.0,
+                    reward_delta REAL DEFAULT 0.0,
+                    success_rate TEXT DEFAULT '',
+                    evidence_count INTEGER DEFAULT 0,
+                    source_session_ids JSON DEFAULT '[]',
+                    tags JSON DEFAULT '[]',
+                    is_active BOOLEAN DEFAULT 0,
+                    metadata JSON,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Migration: add reward_delta column to existing skills tables
+            try:
+                cursor.execute("ALTER TABLE skills ADD COLUMN reward_delta REAL DEFAULT 0.0")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            # Migration: add user_id column to existing skills tables
+            try:
+                cursor.execute("ALTER TABLE skills ADD COLUMN user_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            # Span uploads metadata table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS span_uploads (
+                    upload_id TEXT PRIMARY KEY,
+                    filename TEXT NOT NULL,
+                    row_count INTEGER DEFAULT 0,
+                    session_count INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Imported agent sessions
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS imported_agent_sessions (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL DEFAULT '',
+                    status TEXT DEFAULT 'completed',
+                    metadata JSON DEFAULT '{}',
+                    upload_id TEXT REFERENCES span_uploads(upload_id) ON DELETE CASCADE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP
+                )
+            """)
+
+            # Imported agent spans
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS imported_agent_spans (
+                    id TEXT PRIMARY KEY,
+                    agent_session_id TEXT NOT NULL REFERENCES imported_agent_sessions(id) ON DELETE CASCADE,
+                    span_type TEXT NOT NULL,
+                    span_id TEXT DEFAULT '',
+                    invocation_id TEXT DEFAULT '',
+                    agent_name TEXT DEFAULT '',
+                    started_at REAL,
+                    ended_at REAL,
+                    duration_ms REAL,
+                    model TEXT DEFAULT '',
+                    input_tokens INTEGER,
+                    output_tokens INTEGER,
+                    total_tokens INTEGER,
+                    tool_name TEXT DEFAULT '',
+                    tool_type TEXT DEFAULT '',
+                    error TEXT DEFAULT '',
+                    data JSON DEFAULT '{}',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Eval uploads metadata table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS eval_uploads (
+                    upload_id TEXT PRIMARY KEY,
+                    filename TEXT NOT NULL,
+                    row_count INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Eval upload rows table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS eval_upload_rows (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    upload_id TEXT NOT NULL REFERENCES eval_uploads(upload_id) ON DELETE CASCADE,
+                    session_id TEXT,
+                    agent_trajectory TEXT,
+                    ground_truth TEXT,
+                    rating TEXT DEFAULT '',
+                    trajectory_alignment TEXT DEFAULT '',
+                    task_success BOOLEAN,
+                    tags TEXT,
+                    reference_trajectory TEXT DEFAULT '',
+                    reference_state TEXT DEFAULT '',
+                    reference_answer TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Background jobs table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS background_jobs (
+                    id TEXT PRIMARY KEY,
+                    job_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    progress TEXT DEFAULT '{}',
+                    result TEXT,
+                    error TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Session clusters table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS session_clusters (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    task_type TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    member_count INTEGER DEFAULT 0,
+                    metadata TEXT DEFAULT '{}',
+                    job_id TEXT,
+                    user_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS session_cluster_members (
+                    id TEXT PRIMARY KEY,
+                    cluster_id TEXT NOT NULL REFERENCES session_clusters(id) ON DELETE CASCADE,
+                    session_id TEXT NOT NULL,
+                    labels TEXT NOT NULL DEFAULT '{}',
+                    summary TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(cluster_id, session_id)
+                )
+            """)
+
+            # Migration: add user_id column to session_clusters
+            try:
+                cursor.execute("ALTER TABLE session_clusters ADD COLUMN user_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            # Migration: add user_id column to eval_uploads
+            try:
+                cursor.execute("ALTER TABLE eval_uploads ADD COLUMN user_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            # Migration: add user_id column to eval_results
+            try:
+                cursor.execute("ALTER TABLE eval_results ADD COLUMN user_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            # Migration: add user_id to background_jobs
+            try:
+                cursor.execute("ALTER TABLE background_jobs ADD COLUMN user_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            # Migration: add user_id to chat_sessions
+            try:
+                cursor.execute("ALTER TABLE chat_sessions ADD COLUMN user_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
             conn.commit()
 
     def reset(self):
@@ -219,6 +405,15 @@ class SQLiteStore(DataStore):
 
     def delete_user(self, user_id: str) -> bool:
         return False
+
+    def get_all_users(self) -> list[dict[str, Any]]:
+        return []
+
+    def update_user_team(self, user_id: str, team: str | None) -> dict[str, Any] | None:
+        return None
+
+    def set_superuser(self, user_id: str, is_superuser: bool) -> None:
+        pass
 
     # ── User settings methods (cloud-only — not supported in local/SQLite mode) ──
 
@@ -726,12 +921,12 @@ class SQLiteStore(DataStore):
 
     # ── Chat session methods ─────────────────────────────────────────
 
-    def create_chat_session(self, session_id: str, title: str = "New chat") -> dict[str, Any]:
+    def create_chat_session(self, session_id: str, title: str = "New chat", user_id: str | None = None) -> dict[str, Any]:
         chat_id = str(uuid.uuid4())
         with self._get_conn() as conn:
             conn.execute(
-                "INSERT INTO chat_sessions (id, session_id, title) VALUES (?, ?, ?)",
-                (chat_id, session_id, title),
+                "INSERT INTO chat_sessions (id, session_id, title, user_id) VALUES (?, ?, ?, ?)",
+                (chat_id, session_id, title, user_id),
             )
             conn.commit()
             row = conn.execute("SELECT * FROM chat_sessions WHERE id = ?", (chat_id,)).fetchone()
@@ -739,40 +934,69 @@ class SQLiteStore(DataStore):
             d["message_count"] = 0
             return d
 
-    def get_chat_sessions(self, session_id: str) -> list[dict[str, Any]]:
+    def get_chat_sessions(self, session_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT cs.*, COALESCE(mc.cnt, 0) AS message_count
-                FROM chat_sessions cs
-                LEFT JOIN (SELECT chat_session_id, COUNT(*) AS cnt FROM chat_messages GROUP BY chat_session_id) mc
-                    ON mc.chat_session_id = cs.id
-                WHERE cs.session_id = ?
-                ORDER BY cs.updated_at DESC
-                """,
-                (session_id,),
-            ).fetchall()
+            if user_id:
+                rows = conn.execute(
+                    """
+                    SELECT cs.*, COALESCE(mc.cnt, 0) AS message_count
+                    FROM chat_sessions cs
+                    LEFT JOIN (SELECT chat_session_id, COUNT(*) AS cnt FROM chat_messages GROUP BY chat_session_id) mc
+                        ON mc.chat_session_id = cs.id
+                    WHERE cs.session_id = ? AND cs.user_id = ?
+                    ORDER BY cs.updated_at DESC
+                    """,
+                    (session_id, user_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT cs.*, COALESCE(mc.cnt, 0) AS message_count
+                    FROM chat_sessions cs
+                    LEFT JOIN (SELECT chat_session_id, COUNT(*) AS cnt FROM chat_messages GROUP BY chat_session_id) mc
+                        ON mc.chat_session_id = cs.id
+                    WHERE cs.session_id = ?
+                    ORDER BY cs.updated_at DESC
+                    """,
+                    (session_id,),
+                ).fetchall()
             return [dict(row) for row in rows]
 
-    def delete_chat_session(self, chat_session_id: str) -> bool:
+    def delete_chat_session(self, chat_session_id: str, user_id: str | None = None) -> bool:
         with self._get_conn() as conn:
-            row = conn.execute("SELECT id FROM chat_sessions WHERE id = ?", (chat_session_id,)).fetchone()
+            if user_id:
+                row = conn.execute("SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?", (chat_session_id, user_id)).fetchone()
+            else:
+                row = conn.execute("SELECT id FROM chat_sessions WHERE id = ?", (chat_session_id,)).fetchone()
             if not row:
                 return False
-            conn.execute("DELETE FROM chat_sessions WHERE id = ?", (chat_session_id,))
+            if user_id:
+                conn.execute("DELETE FROM chat_sessions WHERE id = ? AND user_id = ?", (chat_session_id, user_id))
+            else:
+                conn.execute("DELETE FROM chat_sessions WHERE id = ?", (chat_session_id,))
             conn.commit()
             return True
 
-    def get_chat_messages(self, chat_session_id: str) -> list[dict[str, Any]]:
+    def get_chat_messages(self, chat_session_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
+            # Verify ownership of parent chat session when user_id is set
+            if user_id:
+                owner_check = conn.execute("SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?", (chat_session_id, user_id)).fetchone()
+                if not owner_check:
+                    return []
             rows = conn.execute(
                 "SELECT * FROM chat_messages WHERE chat_session_id = ? ORDER BY created_at ASC",
                 (chat_session_id,),
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def append_chat_message(self, chat_session_id: str, role: str, content: str) -> dict[str, Any]:
+    def append_chat_message(self, chat_session_id: str, role: str, content: str, user_id: str | None = None) -> dict[str, Any]:
         with self._get_conn() as conn:
+            # Verify ownership of parent chat session when user_id is set
+            if user_id:
+                owner_check = conn.execute("SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?", (chat_session_id, user_id)).fetchone()
+                if not owner_check:
+                    raise ValueError("Chat session not found or not owned by user")
             cursor = conn.execute(
                 "INSERT INTO chat_messages (chat_session_id, role, content) VALUES (?, ?, ?)",
                 (chat_session_id, role, content),
@@ -788,15 +1012,15 @@ class SQLiteStore(DataStore):
 
     # ── Eval result methods ──────────────────────────────────────
 
-    def create_eval_result(self, data: dict[str, Any]) -> dict[str, Any]:
+    def create_eval_result(self, data: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
         result_id = str(uuid.uuid4())
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO eval_results (id, session_id, dataset_name, model, agent, score, total, correct, errors, signal_averages, items)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO eval_results (id, session_id, dataset_name, model, agent, score, total, correct, errors, signal_averages, items, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (result_id, data["session_id"], data["dataset_name"], data["model"], data["agent"],
                  data["score"], data["total"], data["correct"], data["errors"],
-                 json.dumps(data.get("signal_averages", {})), json.dumps(data.get("items", []))),
+                 json.dumps(data.get("signal_averages", {})), json.dumps(data.get("items", [])), user_id),
             )
             conn.commit()
             row = conn.execute("SELECT * FROM eval_results WHERE id = ?", (result_id,)).fetchone()
@@ -807,12 +1031,18 @@ class SQLiteStore(DataStore):
                 d["items"] = json.loads(d["items"])
             return d
 
-    def get_eval_results(self, session_id: str | None = None) -> list[dict[str, Any]]:
+    def get_eval_results(self, session_id: str | None = None, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
+            clauses = []
+            params: list[Any] = []
             if session_id:
-                rows = conn.execute("SELECT * FROM eval_results WHERE session_id = ? ORDER BY created_at DESC", (session_id,)).fetchall()
-            else:
-                rows = conn.execute("SELECT * FROM eval_results ORDER BY created_at DESC").fetchall()
+                clauses.append("session_id = ?")
+                params.append(session_id)
+            if user_id:
+                clauses.append("user_id = ?")
+                params.append(user_id)
+            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+            rows = conn.execute(f"SELECT * FROM eval_results{where} ORDER BY created_at DESC", params).fetchall()
             results = []
             for row in rows:
                 d = dict(row)
@@ -823,9 +1053,12 @@ class SQLiteStore(DataStore):
                 results.append(d)
             return results
 
-    def get_eval_result(self, result_id: str) -> dict[str, Any] | None:
+    def get_eval_result(self, result_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         with self._get_conn() as conn:
-            row = conn.execute("SELECT * FROM eval_results WHERE id = ?", (result_id,)).fetchone()
+            if user_id:
+                row = conn.execute("SELECT * FROM eval_results WHERE id = ? AND user_id = ?", (result_id, user_id)).fetchone()
+            else:
+                row = conn.execute("SELECT * FROM eval_results WHERE id = ?", (result_id,)).fetchone()
             if row:
                 d = dict(row)
                 if d.get("signal_averages") and isinstance(d["signal_averages"], str):
@@ -835,15 +1068,25 @@ class SQLiteStore(DataStore):
                 return d
         return None
 
-    def get_eval_results_by_project(self, project_id: str) -> list[dict[str, Any]]:
+    def get_eval_results_by_project(self, project_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
-            rows = conn.execute(
-                """SELECT er.* FROM eval_results er
-                JOIN sessions s ON er.session_id = s.id
-                WHERE s.project_id = ?
-                ORDER BY er.created_at DESC""",
-                (project_id,),
-            ).fetchall()
+            if user_id:
+                rows = conn.execute(
+                    """SELECT er.* FROM eval_results er
+                    JOIN sessions s ON er.session_id = s.id
+                    JOIN projects p ON s.project_id = p.id
+                    WHERE p.id = ? AND p.owner_id = ?
+                    ORDER BY er.created_at DESC""",
+                    (project_id, user_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT er.* FROM eval_results er
+                    JOIN sessions s ON er.session_id = s.id
+                    WHERE s.project_id = ?
+                    ORDER BY er.created_at DESC""",
+                    (project_id,),
+                ).fetchall()
             results = []
             for row in rows:
                 d = dict(row)
@@ -853,3 +1096,439 @@ class SQLiteStore(DataStore):
                     d["items"] = json.loads(d["items"])
                 results.append(d)
             return results
+
+    # ── Skill methods ──────────────────────────────────────────────
+
+    def _parse_skill_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        d = dict(row)
+        for field in ("source_session_ids", "tags", "metadata"):
+            if d.get(field) and isinstance(d[field], str):
+                try:
+                    d[field] = json.loads(d[field])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        d["is_active"] = bool(d.get("is_active"))
+        return d
+
+    def create_skill(self, data: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
+        skill_id = str(uuid.uuid4())
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO skills (id, title, description, category, confidence, reward_delta,
+                   success_rate, evidence_count, source_session_ids, tags, is_active, metadata, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (skill_id, data["title"], data["description"],
+                 data.get("category", "general"), data.get("confidence", 0.0),
+                 data.get("reward_delta", 0.0), data.get("success_rate", ""),
+                 data.get("evidence_count", 0),
+                 json.dumps(data.get("source_session_ids", [])),
+                 json.dumps(data.get("tags", [])),
+                 int(data.get("is_active", False)),
+                 json.dumps(data.get("metadata")),
+                 user_id),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM skills WHERE id = ?", (skill_id,)).fetchone()
+            return self._parse_skill_row(row)
+
+    def get_skills(self, is_active: bool | None = None, category: str | None = None, user_id: str | None = None) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            query = "SELECT * FROM skills WHERE 1=1"
+            params: list[Any] = []
+            if user_id is not None:
+                query += " AND user_id = ?"
+                params.append(user_id)
+            if is_active is not None:
+                query += " AND is_active = ?"
+                params.append(int(is_active))
+            if category:
+                query += " AND category = ?"
+                params.append(category)
+            query += " ORDER BY created_at DESC"
+            rows = conn.execute(query, params).fetchall()
+            return [self._parse_skill_row(row) for row in rows]
+
+    def get_skill(self, skill_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            query = "SELECT * FROM skills WHERE id = ?"
+            params: list[Any] = [skill_id]
+            if user_id is not None:
+                query += " AND user_id = ?"
+                params.append(user_id)
+            row = conn.execute(query, params).fetchone()
+            return self._parse_skill_row(row) if row else None
+
+    def update_skill(self, skill_id: str, data: dict[str, Any], user_id: str | None = None) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            check_query = "SELECT * FROM skills WHERE id = ?"
+            check_params: list[Any] = [skill_id]
+            if user_id is not None:
+                check_query += " AND user_id = ?"
+                check_params.append(user_id)
+            existing = conn.execute(check_query, check_params).fetchone()
+            if not existing:
+                return None
+            sets = ["updated_at = CURRENT_TIMESTAMP"]
+            params: list[Any] = []
+            for key in ("title", "description", "category"):
+                if key in data:
+                    sets.append(f"{key} = ?")
+                    params.append(data[key])
+            if "is_active" in data:
+                sets.append("is_active = ?")
+                params.append(int(data["is_active"]))
+            if "tags" in data:
+                sets.append("tags = ?")
+                params.append(json.dumps(data["tags"]))
+            where = "WHERE id = ?"
+            params.append(skill_id)
+            if user_id is not None:
+                where += " AND user_id = ?"
+                params.append(user_id)
+            conn.execute(f"UPDATE skills SET {', '.join(sets)} {where}", params)
+            conn.commit()
+            row = conn.execute("SELECT * FROM skills WHERE id = ?", (skill_id,)).fetchone()
+            return self._parse_skill_row(row)
+
+    def delete_skill(self, skill_id: str, user_id: str | None = None) -> bool:
+        with self._get_conn() as conn:
+            query = "DELETE FROM skills WHERE id = ?"
+            params: list[Any] = [skill_id]
+            if user_id is not None:
+                query += " AND user_id = ?"
+                params.append(user_id)
+            cursor = conn.execute(query, params)
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_all_skills(self, user_id: str | None = None) -> int:
+        with self._get_conn() as conn:
+            if user_id is not None:
+                cursor = conn.execute("DELETE FROM skills WHERE user_id = ?", (user_id,))
+            else:
+                cursor = conn.execute("DELETE FROM skills")
+            conn.commit()
+            return cursor.rowcount
+
+    def delete_all_eval_results(self, user_id: str | None = None) -> int:
+        with self._get_conn() as conn:
+            if user_id:
+                cursor = conn.execute("DELETE FROM eval_results WHERE user_id = ?", (user_id,))
+            else:
+                cursor = conn.execute("DELETE FROM eval_results")
+            conn.commit()
+            return cursor.rowcount
+
+    def delete_all_eval_uploads(self, user_id: str | None = None) -> int:
+        with self._get_conn() as conn:
+            if user_id:
+                cursor = conn.execute("DELETE FROM eval_uploads WHERE user_id = ?", (user_id,))
+            else:
+                cursor = conn.execute("DELETE FROM eval_uploads")
+            conn.commit()
+            return cursor.rowcount
+
+    def delete_all_jobs(self, user_id: str | None = None) -> int:
+        with self._get_conn() as conn:
+            if user_id:
+                cursor = conn.execute("DELETE FROM background_jobs WHERE user_id = ?", (user_id,))
+            else:
+                cursor = conn.execute("DELETE FROM background_jobs")
+            conn.commit()
+            return cursor.rowcount
+
+    # ── Eval upload methods ──────────────────────────────────────────
+
+    def create_eval_upload(self, upload_id: str, filename: str, rows: list[dict[str, Any]], user_id: str | None = None) -> dict[str, Any]:
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO eval_uploads (upload_id, filename, row_count, user_id) VALUES (?, ?, ?, ?)",
+                (upload_id, filename, len(rows), user_id),
+            )
+            for row in rows:
+                task_success_raw = row.get("task_success", "")
+                task_success_val = None
+                if isinstance(task_success_raw, str) and task_success_raw.strip().lower() in ("true", "1", "yes"):
+                    task_success_val = True
+                elif isinstance(task_success_raw, str) and task_success_raw.strip().lower() in ("false", "0", "no"):
+                    task_success_val = False
+
+                conn.execute(
+                    """INSERT INTO eval_upload_rows
+                    (upload_id, session_id, agent_trajectory, ground_truth, rating,
+                     trajectory_alignment, task_success, tags,
+                     reference_trajectory, reference_state, reference_answer)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (upload_id, row["session_id"], row["agent_trajectory"], row["ground_truth"],
+                     row.get("rating", ""), row.get("trajectory_alignment", ""), task_success_val,
+                     row.get("tags", ""),
+                     row.get("reference_trajectory", ""), row.get("reference_state", ""), row.get("reference_answer", "")),
+                )
+            conn.commit()
+            result = conn.execute("SELECT * FROM eval_uploads WHERE upload_id = ?", (upload_id,)).fetchone()
+            return dict(result)
+
+    def get_eval_uploads(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            if user_id:
+                rows = conn.execute("SELECT * FROM eval_uploads WHERE user_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM eval_uploads ORDER BY created_at DESC").fetchall()
+            return [dict(row) for row in rows]
+
+    def get_eval_upload_rows(self, upload_id: str, user_id: str | None = None) -> list[dict[str, Any]] | None:
+        with self._get_conn() as conn:
+            if user_id:
+                exists = conn.execute("SELECT upload_id FROM eval_uploads WHERE upload_id = ? AND user_id = ?", (upload_id, user_id)).fetchone()
+            else:
+                exists = conn.execute("SELECT upload_id FROM eval_uploads WHERE upload_id = ?", (upload_id,)).fetchone()
+            if not exists:
+                return None
+            rows = conn.execute(
+                "SELECT * FROM eval_upload_rows WHERE upload_id = ? ORDER BY id",
+                (upload_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def delete_eval_upload(self, upload_id: str, user_id: str | None = None) -> bool:
+        with self._get_conn() as conn:
+            if user_id:
+                exists = conn.execute("SELECT upload_id FROM eval_uploads WHERE upload_id = ? AND user_id = ?", (upload_id, user_id)).fetchone()
+            else:
+                exists = conn.execute("SELECT upload_id FROM eval_uploads WHERE upload_id = ?", (upload_id,)).fetchone()
+            if not exists:
+                return False
+            conn.execute("DELETE FROM eval_uploads WHERE upload_id = ?", (upload_id,))
+            conn.commit()
+            return True
+
+    # ── Background jobs ──────────────────────────────────────────────
+
+    def create_job(self, job_type: str, user_id: str | None = None) -> dict[str, Any]:
+        import uuid
+        job_id = str(uuid.uuid4())
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO background_jobs (id, job_type, user_id) VALUES (?, ?, ?)",
+                (job_id, job_type, user_id),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM background_jobs WHERE id = ?", (job_id,)).fetchone()
+            return self._parse_job_row(dict(row))
+
+    def get_job(self, job_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            if user_id:
+                row = conn.execute("SELECT * FROM background_jobs WHERE id = ? AND user_id = ?", (job_id, user_id)).fetchone()
+            else:
+                row = conn.execute("SELECT * FROM background_jobs WHERE id = ?", (job_id,)).fetchone()
+            return self._parse_job_row(dict(row)) if row else None
+
+    def update_job_status(
+        self,
+        job_id: str,
+        status: str,
+        progress: dict[str, Any] | None = None,
+        result: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any] | None:
+        import json as _json
+        with self._get_conn() as conn:
+            sets = ["status = ?", "updated_at = CURRENT_TIMESTAMP"]
+            vals: list[Any] = [status]
+            if progress is not None:
+                sets.append("progress = ?")
+                vals.append(_json.dumps(progress, default=str))
+            if result is not None:
+                sets.append("result = ?")
+                vals.append(_json.dumps(result, default=str))
+            if error is not None:
+                sets.append("error = ?")
+                vals.append(error)
+            vals.append(job_id)
+            conn.execute(f"UPDATE background_jobs SET {', '.join(sets)} WHERE id = ?", vals)
+            conn.commit()
+            row = conn.execute("SELECT * FROM background_jobs WHERE id = ?", (job_id,)).fetchone()
+            return self._parse_job_row(dict(row)) if row else None
+
+    def list_jobs(self, job_type: str | None = None, limit: int = 20, user_id: str | None = None) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            wheres: list[str] = []
+            vals: list[Any] = []
+            if job_type:
+                wheres.append("job_type = ?")
+                vals.append(job_type)
+            if user_id:
+                wheres.append("user_id = ?")
+                vals.append(user_id)
+            where_clause = (" WHERE " + " AND ".join(wheres)) if wheres else ""
+            vals.append(limit)
+            rows = conn.execute(
+                f"SELECT * FROM background_jobs{where_clause} ORDER BY created_at DESC LIMIT ?",
+                vals,
+            ).fetchall()
+            return [self._parse_job_row(dict(r)) for r in rows]
+
+    def delete_job(self, job_id: str, user_id: str | None = None) -> bool:
+        with self._get_conn() as conn:
+            if user_id:
+                row = conn.execute("SELECT id FROM background_jobs WHERE id = ? AND user_id = ?", (job_id, user_id)).fetchone()
+            else:
+                row = conn.execute("SELECT id FROM background_jobs WHERE id = ?", (job_id,)).fetchone()
+            if not row:
+                return False
+            if user_id:
+                conn.execute("DELETE FROM background_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+            else:
+                conn.execute("DELETE FROM background_jobs WHERE id = ?", (job_id,))
+            conn.commit()
+            return True
+
+    def cleanup_dangling_jobs(self) -> int:
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "UPDATE background_jobs SET status = 'failed', error = 'Server restarted', "
+                "updated_at = CURRENT_TIMESTAMP WHERE status IN ('pending', 'running')"
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    @staticmethod
+    def _parse_job_row(d: dict[str, Any]) -> dict[str, Any]:
+        import json as _json
+        for field in ("progress", "result"):
+            val = d.get(field)
+            if isinstance(val, str):
+                try:
+                    d[field] = _json.loads(val)
+                except (ValueError, TypeError):
+                    d[field] = {}
+            if d.get(field) is None:
+                d[field] = {} if field == "progress" else None
+        return d
+
+    # ── Session clusters ─────────────────────────────────────────────
+
+    def create_cluster(self, data: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
+        cluster_id = str(uuid.uuid4())
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO session_clusters (id, name, task_type, description, member_count, metadata, job_id, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    cluster_id,
+                    data["name"],
+                    data["task_type"],
+                    data.get("description", ""),
+                    data.get("member_count", 0),
+                    json.dumps(data.get("metadata", {}), default=str),
+                    data.get("job_id"),
+                    user_id,
+                ),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM session_clusters WHERE id = ?", (cluster_id,)).fetchone()
+            return self._parse_cluster_row(dict(row))
+
+    def get_clusters(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            if user_id:
+                rows = conn.execute(
+                    "SELECT * FROM session_clusters WHERE user_id = ? ORDER BY member_count DESC",
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM session_clusters ORDER BY member_count DESC").fetchall()
+            return [self._parse_cluster_row(dict(row)) for row in rows]
+
+    def get_cluster(self, cluster_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            if user_id:
+                row = conn.execute(
+                    "SELECT * FROM session_clusters WHERE id = ? AND user_id = ?",
+                    (cluster_id, user_id),
+                ).fetchone()
+            else:
+                row = conn.execute("SELECT * FROM session_clusters WHERE id = ?", (cluster_id,)).fetchone()
+            return self._parse_cluster_row(dict(row)) if row else None
+
+    def get_cluster_members(self, cluster_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM session_cluster_members WHERE cluster_id = ? ORDER BY created_at",
+                (cluster_id,),
+            ).fetchall()
+            return [self._parse_cluster_member_row(dict(row)) for row in rows]
+
+    def add_cluster_member(
+        self, cluster_id: str, session_id: str, labels: dict[str, Any], summary: str = ""
+    ) -> dict[str, Any]:
+        member_id = str(uuid.uuid4())
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO session_cluster_members (id, cluster_id, session_id, labels, summary)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (cluster_id, session_id) DO UPDATE SET labels = excluded.labels, summary = excluded.summary""",
+                (member_id, cluster_id, session_id, json.dumps(labels, default=str), summary),
+            )
+            # Update member_count
+            conn.execute(
+                "UPDATE session_clusters SET member_count = "
+                "(SELECT count(*) FROM session_cluster_members WHERE cluster_id = ?), "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (cluster_id, cluster_id),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM session_cluster_members WHERE cluster_id = ? AND session_id = ?",
+                (cluster_id, session_id),
+            ).fetchone()
+            return self._parse_cluster_member_row(dict(row))
+
+    def update_cluster_metadata(self, cluster_id: str, metadata: dict[str, Any], description: str = "") -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE session_clusters SET metadata = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (json.dumps(metadata, default=str), description, cluster_id),
+            )
+            conn.commit()
+
+    def get_clusters_by_job(self, job_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM session_clusters WHERE job_id = ? ORDER BY member_count DESC",
+                (job_id,),
+            ).fetchall()
+            return [self._parse_cluster_row(dict(row)) for row in rows]
+
+    def delete_all_clusters(self, user_id: str | None = None) -> int:
+        with self._get_conn() as conn:
+            if user_id:
+                cursor = conn.execute("DELETE FROM session_clusters WHERE user_id = ?", (user_id,))
+            else:
+                cursor = conn.execute("DELETE FROM session_clusters")
+            count = cursor.rowcount
+            conn.commit()
+            return count
+
+    @staticmethod
+    def _parse_cluster_row(d: dict[str, Any]) -> dict[str, Any]:
+        val = d.get("metadata")
+        if isinstance(val, str):
+            try:
+                d["metadata"] = json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                d["metadata"] = {}
+        d.setdefault("metadata", {})
+        return d
+
+    @staticmethod
+    def _parse_cluster_member_row(d: dict[str, Any]) -> dict[str, Any]:
+        val = d.get("labels")
+        if isinstance(val, str):
+            try:
+                d["labels"] = json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                d["labels"] = {}
+        d.setdefault("labels", {})
+        return d

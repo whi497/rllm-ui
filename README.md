@@ -29,54 +29,66 @@ That's it. No need to setup the database and other configurations.
 
 ### Self-hosted Setup
 
+#### Quick Start (Docker)
+
 ```bash
 git clone https://github.com/rllm-org/rllm-ui.git
 cd rllm-ui
+cp .env.example .env
+# Edit .env — add ANTHROPIC_API_KEY to enable the AI agent (optional)
+docker-compose up
+```
 
+Open [http://localhost:3000](http://localhost:3000). Data is stored in a Docker volume and persists across restarts.
+
+#### With BigQuery Traces
+
+If your agent traces are in BigQuery, use the BigQuery overlay to mount your GCP credentials:
+
+```bash
+# Authenticate with GCP (one-time)
+gcloud auth application-default login
+
+# Start with BigQuery support
+docker-compose -f docker-compose.yml -f docker-compose.bigquery.yml up
+```
+
+Then configure your BQ project, dataset, and table in the UI — see the [Agent Observability Guide](docs/AGENT_OBSERVABILITY_GUIDE.md) for detailed steps.
+
+Alternatively, for service account key auth, see the comments in `docker-compose.bigquery.yml`.
+
+#### Development without Docker
+
+```bash
 # Install dependencies
 cd api && pip install -r requirements.txt
 cd ../frontend && npm install
 
 # Run (two terminals)
-cd api && uvicorn main:app --reload --port 3000
+cd api && uvicorn main:app --reload --port 8000
 cd frontend && npm run dev
 ```
 
-Open `http://localhost:5173` (or the port shown in the Vite output).
-
-> [!TIP]
-> If you run the API on a port other than 3000, update both sides so they know where to find it:
->
-> - **rLLM training side** — `export RLLM_UI_URL="http://localhost:<port>"`
-> - **rllm-ui frontend** — set `VITE_API_URL=http://localhost:<port>` in `frontend/.env.development`
+Open [http://localhost:5173](http://localhost:5173).
 
 #### Database
 
-rLLM UI stores sessions, metrics, episodes, trajectories, and logs in a database so they persist across restarts and are searchable.
-
-- **SQLite** (default) — No setup required. A local file (`api/rllm_ui.db`) is created on first run.
-- **PostgreSQL** — Adds full-text search with stemming and relevance ranking. Set `DATABASE_URL` in `api/.env`:
+- **SQLite** (default) — No setup required. Created automatically on first run.
+- **PostgreSQL** — Adds full-text search with stemming and relevance ranking. Set `DATABASE_URL` in `.env`:
 
 ```bash
-DATABASE_URL="postgresql://user:pass@localhost:5432/rllm"
-```
-
-#### Observability AI Agent
-
-To enable the agent, set your Anthropic API key in `api/.env`:
-
-```bash
-ANTHROPIC_API_KEY="sk-ant-..."
+DATABASE_URL="postgresql://user:pass@localhost:5432/rllm_ui"
 ```
 
 #### Configuration
 
-| Variable | Required | Scope | Default | Description |
-|----------|----------|-------|---------|-------------|
-| `RLLM_UI_URL` | No | Training script env | `http://localhost:3000` | URL of your local rllm-ui server |
-| `DATABASE_URL` | No | `api/.env` | SQLite | PostgreSQL connection string. Defaults to SQLite if unset. |
-| `ANTHROPIC_API_KEY` | No | `api/.env` | — | Enables the built-in AI agent |
-| `VITE_API_URL` | No | `frontend/.env.development` | `http://localhost:3000` | Only needed if the API runs on a non-default port |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | No | — | Enables the built-in observability AI agent |
+| `DATABASE_URL` | No | SQLite | PostgreSQL connection string |
+| `RLLM_UI_URL` | No | `http://localhost:3000` | URL of your rllm-ui server (for training scripts) |
+
+BigQuery project, dataset, and table are configured in the UI (Settings page or on first use). See the [Agent Observability Guide](docs/AGENT_OBSERVABILITY_GUIDE.md).
 
 ---
 

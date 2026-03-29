@@ -1,0 +1,7 @@
+session_id,ground_truth,tags
+sess-001,"def fib(n): return n if n <= 1 else fib(n-1) + fib(n-2)",coding;fibonacci
+sess-002,"Tokyo population: 13.96 million",factual;geography
+sess-FAKE-001,"The answer is 42",invalid;should-fail
+sess-003,"Add base case: if len(lst) <= 1: return lst",coding;bugfix
+sess-NONEXISTENT,"This session does not exist",invalid;should-fail
+sess-BOGUS-999,"Another fake session",invalid;should-fail

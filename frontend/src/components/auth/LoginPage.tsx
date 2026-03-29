@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "../../config/api";
+import { VisibilityIcon, VisibilityOffIcon } from "../icons";
 
 const GitHubIcon = () => (
   <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
@@ -21,7 +22,7 @@ const GoogleIcon = () => (
 );
 
 export const LoginPage: React.FC = () => {
-  const { login, register, config } = useAuth();
+  const { login, register, localDevLogin, config } = useAuth();
   const router = useRouter();
   const oauthProviders = config?.oauth_providers ?? [];
   const [isRegister, setIsRegister] = useState(false);
@@ -30,6 +31,7 @@ export const LoginPage: React.FC = () => {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +46,19 @@ export const LoginPage: React.FC = () => {
     if (result) {
       setError(result);
     } else {
-      router.push("/");
+      router.push("/observability");
+    }
+  };
+
+  const handleLocalDevLogin = async () => {
+    setError(null);
+    setLoading(true);
+    const result = await localDevLogin();
+    setLoading(false);
+    if (result) {
+      setError(result);
+    } else {
+      router.push("/observability");
     }
   };
 
@@ -136,15 +150,29 @@ export const LoginPage: React.FC = () => {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Password
               </label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-gray-400"
-                placeholder="••••••••"
-                minLength={6}
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-gray-400"
+                  placeholder="••••••••"
+                  minLength={6}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <VisibilityOffIcon size={16} />
+                  ) : (
+                    <VisibilityIcon size={16} />
+                  )}
+                </button>
+              </div>
             </div>
 
             {error && (
@@ -161,6 +189,29 @@ export const LoginPage: React.FC = () => {
               {loading ? "Loading..." : isRegister ? "Create account" : "Sign in"}
             </button>
           </form>
+
+          {/* Local dev quick login — shown only when BigQuery is configured */}
+          {config?.local_dev_login && (
+            <>
+              <div className="relative my-4">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-200" />
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="bg-white px-2 text-gray-400">or</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleLocalDevLogin}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-gray-900 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Continue as local user
+              </button>
+            </>
+          )}
 
           <div className="mt-4 text-center">
             <button
