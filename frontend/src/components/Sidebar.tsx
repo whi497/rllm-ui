@@ -58,7 +58,7 @@ export const Sidebar: React.FC = () => {
   const isDragging = useRef(false);
 
   const isProjectsActive =
-    pathname === "/" ||
+    pathname === "/training" ||
     pathname.startsWith("/runs") ||
     pathname.startsWith("/project");
 
@@ -129,12 +129,12 @@ export const Sidebar: React.FC = () => {
 
   // Auto-collapse main sidebar when navigating away from home (project overview, run, or settings)
   useEffect(() => {
-    if (projectOverviewMatch || activeSessionId || isSettingsActive || isEvaluationActive || isObservabilityActive || isClustersActive || isSkillsActive || isSpanImportActive || isEvalInputActive || isAdminActive) {
+    if (projectOverviewMatch || activeSessionId || isEvaluationActive || isObservabilityActive || isClustersActive || isSkillsActive || isSpanImportActive || isEvalInputActive || isAdminActive) {
       setIsCollapsed(true);
     } else {
       setIsCollapsed(false);
     }
-  }, [projectOverviewMatch, activeSessionId, isSettingsActive]);
+  }, [projectOverviewMatch, activeSessionId]);
 
   // Drag resize for experiments panel
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -312,7 +312,7 @@ export const Sidebar: React.FC = () => {
             {!isCollapsed && <span>Skills</span>}
           </Link>
           <Link
-            href="/"
+            href="/training"
             className={`
               flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg
               transition-colors duration-150
