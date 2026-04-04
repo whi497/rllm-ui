@@ -261,7 +261,6 @@ class UserResponse(BaseModel):
     id: str
     email: str
     name: str | None = None
-    api_key: str | None = None
     team: str | None = None
     is_superuser: bool = False
     impersonating: bool = False

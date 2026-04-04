@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from auth import COOKIE_NAME, SECURE_COOKIES, create_jwt, detect_team, generate_api_key, is_superuser_email
+from auth import COOKIE_NAME, SECURE_COOKIES, api_key_hint, create_jwt, detect_team, generate_api_key, hash_api_key, is_superuser_email
 
 router = APIRouter(prefix="/api/oauth", tags=["oauth"])
 
@@ -248,12 +248,14 @@ async def _find_or_create_user(
             # Refresh user data
             user = store.get_user_by_id(user["id"])
         else:
-            # 3. Create new user
+            # 3. Create new user (hash the key before storing)
+            raw_key = generate_api_key()
             user = store.create_oauth_user(
                 user_id=str(uuid.uuid4()),
                 email=email,
                 name=name,
-                api_key=generate_api_key(),
+                api_key_hash=hash_api_key(raw_key),
+                api_key_hint=api_key_hint(raw_key),
                 oauth_provider=provider,
                 oauth_provider_id=provider_id,
             )
@@ -281,4 +283,17 @@ async def _find_or_create_user(
         samesite="lax",
         max_age=72 * 3600,
     )
+
+    # For new OAuth users, pass the one-time API key via a short-lived cookie
+    # so the frontend can display it in the WelcomeModal, then clear it.
+    if is_new:
+        response.set_cookie(
+            key="rllm_new_api_key",
+            value=raw_key,
+            httponly=False,
+            secure=SECURE_COOKIES,
+            samesite="lax",
+            max_age=120,
+        )
+
     return response

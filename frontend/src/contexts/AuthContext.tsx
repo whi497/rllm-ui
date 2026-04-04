@@ -14,7 +14,6 @@ interface User {
   id: string;
   email: string;
   name: string | null;
-  api_key: string | null;
   team: string | null;
   is_superuser: boolean;
   impersonating: boolean;
@@ -25,6 +24,7 @@ interface AuthState {
   user: User | null;
   isLoading: boolean;
   justRegistered: boolean;
+  oneTimeApiKey: string | null;
   clearJustRegistered: () => void;
   login: (email: string, password: string) => Promise<string | null>;
   register: (email: string, password: string, name?: string) => Promise<string | null>;
@@ -40,6 +40,7 @@ const AuthContext = createContext<AuthState>({
   user: null,
   isLoading: true,
   justRegistered: false,
+  oneTimeApiKey: null,
   clearJustRegistered: () => {},
   login: async () => null,
   register: async () => null,
@@ -55,8 +56,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [justRegistered, setJustRegistered] = useState(false);
+  const [oneTimeApiKey, setOneTimeApiKey] = useState<string | null>(null);
 
-  const clearJustRegistered = useCallback(() => setJustRegistered(false), []);
+  const clearJustRegistered = useCallback(() => {
+    setJustRegistered(false);
+    setOneTimeApiKey(null);
+  }, []);
 
   const fetchMe = useCallback(async () => {
     const meRes = await apiFetch("/api/auth/me");
@@ -84,6 +89,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               // Check for OAuth welcome redirect (new user)
               const params = new URLSearchParams(window.location.search);
               if (params.get("welcome") === "1") {
+                // Read the one-time API key from the cookie set by the OAuth flow
+                const cookieMatch = document.cookie.match(/(?:^|;\s*)rllm_new_api_key=([^;]*)/);
+                if (cookieMatch) {
+                  setOneTimeApiKey(decodeURIComponent(cookieMatch[1]));
+                  document.cookie = "rllm_new_api_key=; max-age=0; path=/";
+                }
                 welcome = true;
                 params.delete("welcome");
                 const cleanUrl = params.toString()
@@ -135,7 +146,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       if (res.ok) {
         const data = await res.json();
-        setUser(data);
+        const { api_key, ...userData } = data;
+        setUser(userData);
+        setOneTimeApiKey(api_key);
         setJustRegistered(true);
         return null;
       }
@@ -200,6 +213,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         isLoading,
         justRegistered,
+        oneTimeApiKey,
         clearJustRegistered,
         login,
         register,

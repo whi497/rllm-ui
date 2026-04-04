@@ -4,6 +4,7 @@ Auth is always enforced. DEPLOYMENT_MODE controls cookie security
 (cloud = secure cookies for HTTPS) and agent key resolution.
 """
 
+import hashlib
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -110,6 +111,16 @@ def generate_api_key() -> str:
     return f"rllm_{uuid.uuid4().hex}"
 
 
+def hash_api_key(api_key: str) -> str:
+    """SHA-256 hash of an API key for storage. No salt needed — keys have 128 bits of entropy."""
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def api_key_hint(api_key: str) -> str:
+    """Last 4 characters of the key, for display in settings."""
+    return api_key[-4:]
+
+
 # ── FastAPI dependency ────────────────────────────────────────────
 
 async def get_current_user(request: Request) -> dict:
@@ -128,7 +139,7 @@ async def get_current_user(request: Request) -> dict:
         if auth_header.startswith("Bearer "):
             api_key = auth_header[7:]
     if api_key:
-        user = store.get_user_by_api_key(api_key)
+        user = store.get_user_by_api_key(hash_api_key(api_key))
         if user:
             return user
         raise HTTPException(status_code=401, detail="Invalid API key")

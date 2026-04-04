@@ -60,7 +60,8 @@ class PostgresStore(DataStore):
                         email TEXT NOT NULL UNIQUE,
                         password_hash TEXT,
                         name TEXT,
-                        api_key TEXT UNIQUE,
+                        api_key_hash TEXT UNIQUE,
+                        api_key_hint TEXT,
                         oauth_provider TEXT,
                         oauth_provider_id TEXT,
                         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -106,6 +107,24 @@ class PostgresStore(DataStore):
                     DO $$ BEGIN
                         ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN DEFAULT FALSE;
                     EXCEPTION WHEN others THEN NULL;
+                    END $$;
+                """)
+
+                # Migration: hash plain-text api_key → api_key_hash + api_key_hint
+                cursor.execute("""
+                    DO $$ BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'users' AND column_name = 'api_key'
+                        ) THEN
+                            ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key_hash TEXT UNIQUE;
+                            ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key_hint TEXT;
+                            UPDATE users
+                                SET api_key_hash = encode(sha256(api_key::bytea), 'hex'),
+                                    api_key_hint = right(api_key, 4)
+                                WHERE api_key IS NOT NULL AND api_key_hash IS NULL;
+                            ALTER TABLE users DROP COLUMN api_key;
+                        END IF;
                     END $$;
                 """)
 
@@ -581,12 +600,14 @@ class PostgresStore(DataStore):
 
     # ── User methods ───────────────────────────────────────────────
 
-    def create_user(self, user_id: str, email: str, password_hash: str, name: str | None, api_key: str) -> dict[str, Any]:
+    def create_user(self, user_id: str, email: str, password_hash: str, name: str | None,
+                    api_key_hash: str, api_key_hint: str) -> dict[str, Any]:
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "INSERT INTO users (id, email, password_hash, name, api_key) VALUES (%s, %s, %s, %s, %s) RETURNING *",
-                    (user_id, email, password_hash, name, api_key),
+                    "INSERT INTO users (id, email, password_hash, name, api_key_hash, api_key_hint) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
+                    (user_id, email, password_hash, name, api_key_hash, api_key_hint),
                 )
                 row = cursor.fetchone()
                 conn.commit()
@@ -599,10 +620,11 @@ class PostgresStore(DataStore):
                 row = cursor.fetchone()
                 return dict(row) if row else None
 
-    def get_user_by_api_key(self, api_key: str) -> dict[str, Any] | None:
+    def get_user_by_api_key(self, api_key_hash: str) -> dict[str, Any] | None:
+        """Look up a user by the SHA-256 hash of their API key."""
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM users WHERE api_key = %s", (api_key,))
+                cursor.execute("SELECT * FROM users WHERE api_key_hash = %s", (api_key_hash,))
                 row = cursor.fetchone()
                 return dict(row) if row else None
 
@@ -623,14 +645,15 @@ class PostgresStore(DataStore):
                 row = cursor.fetchone()
                 return dict(row) if row else None
 
-    def create_oauth_user(self, user_id: str, email: str, name: str | None, api_key: str,
+    def create_oauth_user(self, user_id: str, email: str, name: str | None,
+                          api_key_hash: str, api_key_hint: str,
                           oauth_provider: str, oauth_provider_id: str) -> dict[str, Any]:
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "INSERT INTO users (id, email, name, api_key, oauth_provider, oauth_provider_id) "
-                    "VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
-                    (user_id, email, name, api_key, oauth_provider, oauth_provider_id),
+                    "INSERT INTO users (id, email, name, api_key_hash, api_key_hint, oauth_provider, oauth_provider_id) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *",
+                    (user_id, email, name, api_key_hash, api_key_hint, oauth_provider, oauth_provider_id),
                 )
                 row = cursor.fetchone()
                 conn.commit()
@@ -647,12 +670,12 @@ class PostgresStore(DataStore):
                 conn.commit()
                 return dict(row) if row else None
 
-    def update_user_api_key(self, user_id: str, new_api_key: str) -> dict[str, Any] | None:
+    def update_user_api_key(self, user_id: str, api_key_hash: str, api_key_hint: str) -> dict[str, Any] | None:
         with self._get_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "UPDATE users SET api_key = %s WHERE id = %s RETURNING *",
-                    (new_api_key, user_id),
+                    "UPDATE users SET api_key_hash = %s, api_key_hint = %s WHERE id = %s RETURNING *",
+                    (api_key_hash, api_key_hint, user_id),
                 )
                 row = cursor.fetchone()
                 conn.commit()

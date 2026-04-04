@@ -378,13 +378,14 @@ class SQLiteStore(DataStore):
 
     # ── User methods (cloud-only — not supported in local/SQLite mode) ──
 
-    def create_user(self, user_id: str, email: str, password_hash: str, name: str | None, api_key: str) -> dict[str, Any]:
+    def create_user(self, user_id: str, email: str, password_hash: str, name: str | None,
+                    api_key_hash: str, api_key_hint: str) -> dict[str, Any]:
         raise NotImplementedError("User management requires cloud mode (PostgreSQL)")
 
     def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         return None
 
-    def get_user_by_api_key(self, api_key: str) -> dict[str, Any] | None:
+    def get_user_by_api_key(self, api_key_hash: str) -> dict[str, Any] | None:
         return None
 
     def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
@@ -393,14 +394,15 @@ class SQLiteStore(DataStore):
     def get_user_by_oauth(self, provider: str, provider_id: str) -> dict[str, Any] | None:
         return None
 
-    def create_oauth_user(self, user_id: str, email: str, name: str | None, api_key: str,
+    def create_oauth_user(self, user_id: str, email: str, name: str | None,
+                          api_key_hash: str, api_key_hint: str,
                           oauth_provider: str, oauth_provider_id: str) -> dict[str, Any]:
         raise NotImplementedError("User management requires cloud mode (PostgreSQL)")
 
     def link_oauth_to_user(self, user_id: str, oauth_provider: str, oauth_provider_id: str) -> dict[str, Any] | None:
         raise NotImplementedError("User management requires cloud mode (PostgreSQL)")
 
-    def update_user_api_key(self, user_id: str, new_api_key: str) -> dict[str, Any] | None:
+    def update_user_api_key(self, user_id: str, api_key_hash: str, api_key_hint: str) -> dict[str, Any] | None:
         return None
 
     def delete_user(self, user_id: str) -> bool:

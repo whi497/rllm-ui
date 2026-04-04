@@ -55,7 +55,8 @@ class DataStore(ABC):
     # ── User methods (cloud mode only) ────────────────────────────
 
     @abstractmethod
-    def create_user(self, user_id: str, email: str, password_hash: str, name: str | None, api_key: str) -> dict[str, Any]:
+    def create_user(self, user_id: str, email: str, password_hash: str, name: str | None,
+                    api_key_hash: str, api_key_hint: str) -> dict[str, Any]:
         """Create a new user. Returns the user dict."""
         pass
 
@@ -65,8 +66,8 @@ class DataStore(ABC):
         pass
 
     @abstractmethod
-    def get_user_by_api_key(self, api_key: str) -> dict[str, Any] | None:
-        """Look up a user by API key."""
+    def get_user_by_api_key(self, api_key_hash: str) -> dict[str, Any] | None:
+        """Look up a user by the SHA-256 hash of their API key."""
         pass
 
     @abstractmethod
@@ -80,7 +81,8 @@ class DataStore(ABC):
         pass
 
     @abstractmethod
-    def create_oauth_user(self, user_id: str, email: str, name: str | None, api_key: str,
+    def create_oauth_user(self, user_id: str, email: str, name: str | None,
+                          api_key_hash: str, api_key_hint: str,
                           oauth_provider: str, oauth_provider_id: str) -> dict[str, Any]:
         """Create a new user from OAuth. Returns the user dict."""
         pass
@@ -91,8 +93,8 @@ class DataStore(ABC):
         pass
 
     @abstractmethod
-    def update_user_api_key(self, user_id: str, new_api_key: str) -> dict[str, Any] | None:
-        """Replace a user's API key. Returns updated user dict or None if not found."""
+    def update_user_api_key(self, user_id: str, api_key_hash: str, api_key_hint: str) -> dict[str, Any] | None:
+        """Replace a user's API key hash. Returns updated user dict or None if not found."""
         pass
 
     @abstractmethod

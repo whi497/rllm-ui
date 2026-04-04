@@ -7,7 +7,7 @@ import { WelcomeModal } from "./WelcomeModal";
 import { Spinner } from "../ui";
 
 export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { config, user, isLoading, justRegistered, clearJustRegistered } = useAuth();
+  const { config, user, isLoading, justRegistered, oneTimeApiKey, clearJustRegistered } = useAuth();
 
   if (isLoading) {
     return (
@@ -24,11 +24,11 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
   return (
     <>
       {children}
-      {user?.api_key && (
+      {oneTimeApiKey && (
         <WelcomeModal
           open={justRegistered}
           onClose={clearJustRegistered}
-          apiKey={user.api_key}
+          apiKey={oneTimeApiKey}
         />
       )}
     </>

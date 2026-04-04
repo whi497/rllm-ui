@@ -11,9 +11,11 @@ from auth import (
     LOCAL_DEV_USER,
     SECURE_COOKIES,
     CurrentUser,
+    api_key_hint,
     create_jwt,
     detect_team,
     generate_api_key,
+    hash_api_key,
     hash_password,
     is_superuser_email,
     verify_password,
@@ -29,7 +31,6 @@ def _user_response(user: dict, *, impersonating: bool = False) -> UserResponse:
         id=user["id"],
         email=user["email"],
         name=user.get("name"),
-        api_key=user.get("api_key"),
         team=user.get("team"),
         is_superuser=bool(user.get("is_superuser")),
         impersonating=impersonating,
@@ -52,9 +53,12 @@ def get_auth_config():
     return AuthConfigResponse(auth_required=True, deployment_mode=DEPLOYMENT_MODE, oauth_providers=providers, local_dev_login=local_dev_login)
 
 
-@router.post("/register", response_model=UserResponse)
+@router.post("/register")
 def register(request: Request, response: Response, body: RegisterRequest):
-    """Create a new user account. Sets an httpOnly session cookie."""
+    """Create a new user account. Sets an httpOnly session cookie.
+
+    Returns the API key once — it is hashed before storage and cannot be retrieved again.
+    """
     store = request.app.state.store
 
     # Check if email already exists
@@ -66,14 +70,15 @@ def register(request: Request, response: Response, body: RegisterRequest):
 
     user_id = str(uuid.uuid4())
     password_hash = hash_password(body.password)
-    api_key = generate_api_key()
+    raw_key = generate_api_key()
 
     user = store.create_user(
         user_id=user_id,
         email=body.email,
         password_hash=password_hash,
         name=body.name,
-        api_key=api_key,
+        api_key_hash=hash_api_key(raw_key),
+        api_key_hint=api_key_hint(raw_key),
     )
 
     # Auto-assign team from email domain
@@ -93,7 +98,8 @@ def register(request: Request, response: Response, body: RegisterRequest):
         max_age=72 * 3600,
     )
 
-    return _user_response(user)
+    resp = _user_response(user)
+    return {**resp.model_dump(), "api_key": raw_key}
 
 
 @router.post("/local-dev-login", response_model=UserResponse)
@@ -186,12 +192,12 @@ def regenerate_api_key(request: Request, user: CurrentUser):
     The new key is returned once and cannot be retrieved again.
     """
     store = request.app.state.store
-    new_key = generate_api_key()
-    updated = store.update_user_api_key(user["id"], new_key)
+    raw_key = generate_api_key()
+    updated = store.update_user_api_key(user["id"], hash_api_key(raw_key), api_key_hint(raw_key))
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
 
-    return {"api_key": new_key}
+    return {"api_key": raw_key}
 
 
 @router.get("/me", response_model=UserResponse)
