@@ -229,6 +229,7 @@ export const Sidebar: React.FC = () => {
             <ActivityIcon size={18} className="flex-shrink-0" />
             {!isCollapsed && <span>Observability</span>}
           </Link>
+          {/* Hidden: Span Import, Eval Import, Clusters, Skills tabs (pages still accessible via direct URL)
           <Link
             href="/span-import"
             className={`
@@ -311,6 +312,7 @@ export const Sidebar: React.FC = () => {
             <SparklesIcon size={18} className="flex-shrink-0" />
             {!isCollapsed && <span>Skills</span>}
           </Link>
+          */}
           <Link
             href="/training"
             className={`
