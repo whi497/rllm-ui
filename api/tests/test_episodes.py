@@ -411,3 +411,48 @@ def test_training_episode_still_works_after_schema_change(client, test_session):
     assert step["model_response"] == "Answer is 42"
     assert step["mc_return"] == 0.95
     assert step["advantage"] == 0.3
+
+
+def test_batch_post_training_episode_accepts_categorical_signals(client, test_session):
+    """Training episodes may include non-numeric trajectory signals such as ALFWorld task_type."""
+    episode_data = {
+        "session_id": test_session["id"],
+        "session_type": "training",
+        "step": 1,
+        "episode_id": "training-signal-test",
+        "task": {"question": "ALFWorld task"},
+        "is_correct": False,
+        "trajectories": [
+            {
+                "uid": "traj-with-task-type",
+                "reward": 0.0,
+                "signals": {
+                    "accuracy": 0.0,
+                    "task_type": "pick_and_place_simple",
+                },
+                "steps": [
+                    {
+                        "observation": "You are in the middle of a room.",
+                        "action": "look",
+                        "reward": 0.0,
+                        "done": False,
+                    }
+                ],
+            }
+        ],
+    }
+
+    response = client.post(
+        "/api/episodes/batch",
+        json={"session_id": test_session["id"], "episodes": [episode_data]},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "count": 1}
+
+    response = client.get(f"/api/episodes?session_id={test_session['id']}")
+    assert response.status_code == 200
+    [episode] = [ep for ep in response.json() if ep["id"] == "training-signal-test"]
+    assert episode["trajectories"][0]["signals"] == {
+        "accuracy": 0.0,
+        "task_type": "pick_and_place_simple",
+    }

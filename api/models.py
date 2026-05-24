@@ -93,7 +93,7 @@ class Trajectory(BaseModel):
     reward: float | None = None
     input: dict | None = None
     output: Any = None
-    signals: dict[str, float] = {}
+    signals: dict[str, Any] = {}
     metadata: dict[str, Any] | None = None
 
 

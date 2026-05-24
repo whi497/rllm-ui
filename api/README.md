@@ -5,7 +5,7 @@ FastAPI backend for the rLLM UI monitoring platform.
 ## Setup
 
 ```bash
-cd backend/api
+cd rllm-ui/api
 python -m venv venv
 source venv/bin/activate  # or `venv\Scripts\activate` on Windows
 pip install -r requirements.txt
@@ -14,7 +14,7 @@ pip install -r requirements.txt
 ## Running
 
 ```bash
-uvicorn main:app --reload --port 3000
+uvicorn main:app --reload --port 8000
 ```
 
 ## Testing

@@ -160,6 +160,10 @@ async def get_current_user(request: Request) -> dict:
                 return user
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 
+    # 3. Local dev fallback — allow unauthenticated access in local mode
+    if DEPLOYMENT_MODE == "local":
+        return dict(LOCAL_DEV_USER)
+
     raise HTTPException(status_code=401, detail="Authentication required")
 
 

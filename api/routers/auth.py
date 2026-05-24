@@ -50,7 +50,8 @@ def get_auth_config():
     if os.environ.get("GOOGLE_CLIENT_ID"):
         providers.append("google")
     local_dev_login = DEPLOYMENT_MODE == "local"
-    return AuthConfigResponse(auth_required=True, deployment_mode=DEPLOYMENT_MODE, oauth_providers=providers, local_dev_login=local_dev_login)
+    auth_required = DEPLOYMENT_MODE != "local"
+    return AuthConfigResponse(auth_required=auth_required, deployment_mode=DEPLOYMENT_MODE, oauth_providers=providers, local_dev_login=local_dev_login)
 
 
 @router.post("/register")

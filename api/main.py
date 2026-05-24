@@ -2,6 +2,11 @@
 
 Main entry point for the API backend.
 """
+# Python 3.10 compat: inject datetime.UTC (added in 3.11)
+import sys as _sys
+if _sys.version_info < (3, 11):
+    import datetime as _dt
+    _dt.UTC = _dt.timezone.utc
 
 import asyncio
 import logging

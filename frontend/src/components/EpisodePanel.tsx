@@ -50,7 +50,7 @@ interface Trajectory {
   info?: Record<string, any>;
   input?: Record<string, any>;
   output?: any;
-  signals?: Record<string, number>;
+  signals?: Record<string, any>;
   metadata?: Record<string, any>;
   steps: TrajectoryStep[];
 }
@@ -1339,6 +1339,7 @@ const EpisodeBatchCard: React.FC<EpisodeBatchCardProps> = ({
           </p>
         </div>
       )}
+      <PrefixPromptSection episodes={batch.episodes} searchQuery={searchQuery} searchTerms={searchTerms} />
       {batch.episodes.map((episode, idx) => (
         <EpisodeCard
           key={episode.id}
@@ -1428,6 +1429,7 @@ const TaskGroupBatchCard: React.FC<TaskGroupBatchCardProps> = ({
           </p>
         </div>
       )}
+      <PrefixPromptSectionFromGroups groups={batch.groups} preloadedGroupData={preloadedGroupData} searchQuery={searchQuery} searchTerms={searchTerms} />
       {batch.groups.map((group) => (
         <TrajectoryGroupCard
           key={group.id}
@@ -1563,7 +1565,7 @@ const StepView: React.FC<StepViewProps> = ({
       </div>
 
       <div className="space-y-1.5">
-        {visibleFields.map(({ key, value }) => {
+        {visibleFields.map(({ key, value, collapsed }) => {
           const fieldConfig = getFieldConfig(key, value);
           const fieldContent = formatFieldValue(value);
           const isCurrent = isCurrentMatch(key);
@@ -1575,6 +1577,7 @@ const StepView: React.FC<StepViewProps> = ({
               labelColor={fieldConfig.labelColor}
               bgColor={fieldConfig.bgColor}
               borderColor={fieldConfig.borderColor}
+              defaultCollapsed={collapsed}
             >
               <HighlightedText
                 text={fieldContent}
@@ -1860,7 +1863,7 @@ const GroupStepView: React.FC<GroupStepViewProps> = ({
       </div>
 
       <div className="space-y-2">
-        {visibleFields.map(({ key, value }) => {
+        {visibleFields.map(({ key, value, collapsed }) => {
           const fieldConfig = getFieldConfig(key, value);
           const fieldContent = formatFieldValue(value);
           const isCurrent = isCurrentMatch(key);
@@ -1872,6 +1875,7 @@ const GroupStepView: React.FC<GroupStepViewProps> = ({
               labelColor={fieldConfig.labelColor}
               bgColor={fieldConfig.bgColor}
               borderColor={fieldConfig.borderColor}
+              defaultCollapsed={collapsed}
             >
               <HighlightedText
                 text={fieldContent}
@@ -1940,29 +1944,43 @@ const ExpandableFieldBox: React.FC<{
   labelColor: string;
   bgColor: string;
   borderColor: string;
+  defaultCollapsed?: boolean;
   children: React.ReactNode;
-}> = ({ label, labelColor, bgColor, borderColor, children }) => {
+}> = ({ label, labelColor, bgColor, borderColor, defaultCollapsed = false, children }) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState<number | null>(null);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const DEFAULT_HEIGHT = 192;
 
   useEffect(() => {
-    if (contentRef.current) {
+    if (!collapsed && contentRef.current) {
       const scrollH = contentRef.current.scrollHeight;
       setHeight(Math.min(scrollH, DEFAULT_HEIGHT));
     }
-  }, [children]);
+  }, [children, collapsed]);
 
   return (
     <div>
-      <p className={`text-xs font-medium ${labelColor} mb-1`}>{label}</p>
-      <div
-        ref={contentRef}
-        className={`${bgColor} rounded-md border ${borderColor} p-2 text-sm text-gray-800 whitespace-pre-wrap break-words overflow-auto`}
-        style={{ resize: 'vertical', height: height ?? 'auto', minHeight: '2rem', maxHeight: '60vh' }}
-      >
-        {children}
-      </div>
+      {defaultCollapsed ? (
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className={`text-xs font-medium ${labelColor} mb-1 flex items-center gap-1 hover:opacity-80`}
+        >
+          <span className="inline-block w-3 text-gray-400">{collapsed ? "\u25B6" : "\u25BC"}</span>
+          {label}
+        </button>
+      ) : (
+        <p className={`text-xs font-medium ${labelColor} mb-1`}>{label}</p>
+      )}
+      {!collapsed && (
+        <div
+          ref={contentRef}
+          className={`${bgColor} rounded-md border ${borderColor} p-2 text-sm text-gray-800 whitespace-pre-wrap break-words overflow-auto`}
+          style={{ resize: 'vertical', height: height ?? 'auto', minHeight: '2rem', maxHeight: '60vh' }}
+        >
+          {children}
+        </div>
+      )}
     </div>
   );
 };
@@ -1985,35 +2003,252 @@ function isEmptyValue(value: any): boolean {
   return false;
 }
 
+function extractObsFromChatCompletions(step: TrajectoryStep): string | null {
+  if (!step.chat_completions || !Array.isArray(step.chat_completions)) return null;
+  const userMessages = step.chat_completions.filter((m: any) => m.role === "user");
+  if (userMessages.length === 0) return null;
+  return userMessages[userMessages.length - 1]?.content || null;
+}
+
+function getEffectiveModelResponse(step: TrajectoryStep): string | null {
+  if (step.model_response) return step.model_response;
+  if (step.metadata && typeof step.metadata === "object" && step.metadata.model_response) {
+    return step.metadata.model_response;
+  }
+  return null;
+}
+
+function getEffectiveChatCompletions(step: TrajectoryStep): any[] | null {
+  if (step.chat_completions && Array.isArray(step.chat_completions)) return step.chat_completions;
+  if (step.metadata && typeof step.metadata === "object" && Array.isArray(step.metadata.chat_completions)) {
+    return step.metadata.chat_completions;
+  }
+  return null;
+}
+
+function getEffectiveObservation(step: TrajectoryStep): string | null {
+  if (step.observation) return step.observation;
+  if (step.metadata && typeof step.metadata === "object" && step.metadata.observation) {
+    return step.metadata.observation;
+  }
+  // Try extracting from chat_completions (top-level or in metadata)
+  const cc = getEffectiveChatCompletions(step);
+  if (!cc) return null;
+  const userMessages = cc.filter((m: any) => m.role === "user");
+  if (userMessages.length === 0) return null;
+  return userMessages[userMessages.length - 1]?.content || null;
+}
+
+function extractPrefixPrompt(episodes: Episode[]): { system: string | null; firstUser: string | null } | null {
+  const firstEp = episodes[0];
+  const firstStep = firstEp?.trajectories?.[0]?.steps?.[0];
+  if (!firstStep) return null;
+
+  // Try top-level chat_completions first, then metadata.chat_completions
+  let msgs = firstStep.chat_completions;
+  if (!msgs || !Array.isArray(msgs)) {
+    const meta = firstStep.metadata as Record<string, any> | undefined;
+    msgs = meta?.chat_completions;
+  }
+  if (!msgs || !Array.isArray(msgs)) return null;
+
+  const systemMsg = msgs.find((m: any) => m.role === "system");
+  const firstUserMsg = msgs.find((m: any) => m.role === "user");
+
+  if (!systemMsg && !firstUserMsg) return null;
+  return {
+    system: systemMsg?.content || null,
+    firstUser: firstUserMsg?.content || null,
+  };
+}
+
+function extractPrefixPromptFromTrajectories(trajectories: Trajectory[]): { system: string | null; firstUser: string | null } | null {
+  const firstStep = trajectories[0]?.steps?.[0];
+  if (!firstStep) return null;
+
+  let msgs = firstStep.chat_completions;
+  if (!msgs || !Array.isArray(msgs)) {
+    const meta = firstStep.metadata as Record<string, any> | undefined;
+    msgs = meta?.chat_completions;
+  }
+  if (!msgs || !Array.isArray(msgs)) return null;
+
+  const systemMsg = msgs.find((m: any) => m.role === "system");
+  const firstUserMsg = msgs.find((m: any) => m.role === "user");
+
+  if (!systemMsg && !firstUserMsg) return null;
+  return {
+    system: systemMsg?.content || null,
+    firstUser: firstUserMsg?.content || null,
+  };
+}
+
+const PrefixPromptSection: React.FC<{
+  episodes: Episode[];
+  searchQuery: string;
+  searchTerms: string[];
+}> = ({ episodes, searchQuery, searchTerms }) => {
+  const prefix = useMemo(() => extractPrefixPrompt(episodes), [episodes]);
+  const [expanded, setExpanded] = useState(false);
+
+  if (!prefix) return null;
+
+  return (
+    <div className="mt-2 mx-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-1 text-xs font-medium text-blue-700 uppercase tracking-wider hover:opacity-80"
+      >
+        <span className="inline-block w-3 text-blue-400">{expanded ? "\u25BC" : "\u25B6"}</span>
+        Prefix Prompt (System + Initial Observation)
+      </button>
+      {expanded && (
+        <div className="mt-2 space-y-2">
+          {prefix.system && (
+            <div>
+              <p className="text-xs font-medium text-blue-600 mb-1">System Prompt</p>
+              <div className="bg-white rounded-md border border-blue-100 p-2 text-sm text-gray-800 whitespace-pre-wrap break-words overflow-auto" style={{ maxHeight: '40vh', resize: 'vertical' }}>
+                <HighlightedText text={prefix.system} searchQuery={searchQuery} searchTerms={searchTerms} />
+              </div>
+            </div>
+          )}
+          {prefix.firstUser && (
+            <div>
+              <p className="text-xs font-medium text-blue-600 mb-1">Initial Observation</p>
+              <div className="bg-white rounded-md border border-blue-100 p-2 text-sm text-gray-800 whitespace-pre-wrap break-words overflow-auto" style={{ maxHeight: '40vh', resize: 'vertical' }}>
+                <HighlightedText text={prefix.firstUser} searchQuery={searchQuery} searchTerms={searchTerms} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const PrefixPromptSectionFromGroups: React.FC<{
+  groups: TrajectoryGroup[];
+  preloadedGroupData?: Map<string, TrajectoryGroup>;
+  searchQuery: string;
+  searchTerms: string[];
+}> = ({ groups, preloadedGroupData, searchQuery, searchTerms }) => {
+  const prefix = useMemo(() => {
+    for (const group of groups) {
+      const loaded = preloadedGroupData?.get(group.id) || group;
+      const trajectories = loaded.data?.trajectories;
+      if (trajectories && trajectories.length > 0) {
+        const result = extractPrefixPromptFromTrajectories(trajectories);
+        if (result) return result;
+      }
+    }
+    return null;
+  }, [groups, preloadedGroupData]);
+  const [expanded, setExpanded] = useState(false);
+
+  if (!prefix) return null;
+
+  return (
+    <div className="mt-2 mx-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-1 text-xs font-medium text-blue-700 uppercase tracking-wider hover:opacity-80"
+      >
+        <span className="inline-block w-3 text-blue-400">{expanded ? "\u25BC" : "\u25B6"}</span>
+        Prefix Prompt (System + Initial Observation)
+      </button>
+      {expanded && (
+        <div className="mt-2 space-y-2">
+          {prefix.system && (
+            <div>
+              <p className="text-xs font-medium text-blue-600 mb-1">System Prompt</p>
+              <div className="bg-white rounded-md border border-blue-100 p-2 text-sm text-gray-800 whitespace-pre-wrap break-words overflow-auto" style={{ maxHeight: '40vh', resize: 'vertical' }}>
+                <HighlightedText text={prefix.system} searchQuery={searchQuery} searchTerms={searchTerms} />
+              </div>
+            </div>
+          )}
+          {prefix.firstUser && (
+            <div>
+              <p className="text-xs font-medium text-blue-600 mb-1">Initial Observation</p>
+              <div className="bg-white rounded-md border border-blue-100 p-2 text-sm text-gray-800 whitespace-pre-wrap break-words overflow-auto" style={{ maxHeight: '40vh', resize: 'vertical' }}>
+                <HighlightedText text={prefix.firstUser} searchQuery={searchQuery} searchTerms={searchTerms} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 function getVisibleFields(
   step: TrajectoryStep,
-): Array<{ key: string; value: any }> {
-  const fields: Array<{ key: string; value: any }> = [];
+): Array<{ key: string; value: any; collapsed?: boolean }> {
+  const fields: Array<{ key: string; value: any; collapsed?: boolean }> = [];
 
-  const fieldOrder = [
-    "observation",
-    "input",
-    "thought",
-    "model_response",
-    "output",
-    "action",
-    "chat_completions",
-    "info",
-    "metadata",
-  ];
+  // 1. Observation: native field, from metadata, or extracted from chat_completions
+  const obs = getEffectiveObservation(step);
+  if (!isEmptyValue(obs)) {
+    fields.push({ key: "observation", value: obs });
+  }
 
-  fieldOrder.forEach((key) => {
-    if (!HIDDEN_FIELDS.has(key) && !isEmptyValue(step[key])) {
-      fields.push({ key, value: step[key] });
+  // 2. Input (eval-style tasks)
+  if (!isEmptyValue(step.input)) {
+    fields.push({ key: "input", value: step.input });
+  }
+
+  // 3. Model response (top-level or from metadata)
+  const modelResponse = getEffectiveModelResponse(step);
+  if (!isEmptyValue(modelResponse)) {
+    fields.push({ key: "model_response", value: modelResponse });
+  }
+
+  // 4. Output (eval-style tasks)
+  if (!isEmptyValue(step.output)) {
+    fields.push({ key: "output", value: step.output });
+  }
+
+  // 5. Action
+  if (!isEmptyValue(step.action)) {
+    fields.push({ key: "action", value: step.action });
+  }
+
+  // 6. Thought (only if different from model_response)
+  if (!isEmptyValue(step.thought) && step.thought !== modelResponse) {
+    fields.push({ key: "thought", value: step.thought });
+  }
+
+  // 7. Collapsed-by-default fields
+  // For metadata, strip keys already shown above
+  const _METADATA_PROMOTED_KEYS = new Set(["model_response", "observation", "thought", "chat_completions"]);
+  if (!isEmptyValue(step.metadata)) {
+    const meta = step.metadata as Record<string, any>;
+    const filteredMeta: Record<string, any> = {};
+    for (const [k, v] of Object.entries(meta)) {
+      if (!_METADATA_PROMOTED_KEYS.has(k)) {
+        filteredMeta[k] = v;
+      }
     }
-  });
+    if (!isEmptyValue(filteredMeta)) {
+      fields.push({ key: "metadata", value: filteredMeta, collapsed: true });
+    }
+  }
+  if (!isEmptyValue(step.info)) {
+    fields.push({ key: "info", value: step.info, collapsed: true });
+  }
+  // Show chat_completions (from top-level or metadata) as collapsed reference
+  const effectiveCC = getEffectiveChatCompletions(step);
+  if (!isEmptyValue(effectiveCC)) {
+    fields.push({ key: "chat_completions", value: effectiveCC, collapsed: true });
+  }
 
+  // Remaining extra fields
+  const handled = new Set([
+    "observation", "input", "model_response", "output", "action", "thought",
+    "metadata", "info", "chat_completions",
+    ...HIDDEN_FIELDS,
+  ]);
   Object.keys(step).forEach((key) => {
-    if (
-      !HIDDEN_FIELDS.has(key) &&
-      !fieldOrder.includes(key) &&
-      !isEmptyValue(step[key])
-    ) {
+    if (!handled.has(key) && !isEmptyValue(step[key])) {
       fields.push({ key, value: step[key] });
     }
   });
@@ -2039,7 +2274,7 @@ function getFieldConfig(
     observation: { label: "Observation", ...style },
     input: { label: "Input", ...style },
     thought: { label: "Thought", ...style },
-    model_response: { label: "Response", ...style },
+    model_response: { label: "Model Response", ...style },
     output: { label: "Output", ...style },
     action: { label: "Action", ...style },
     chat_completions: { label: "Chat Completions", ...style },

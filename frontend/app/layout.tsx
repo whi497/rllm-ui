@@ -28,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${dmSans.variable} ${ibmPlexMono.variable}`}>
+    <html lang="en" className={`${dmSans.variable} ${ibmPlexMono.variable}`} suppressHydrationWarning>
       <body>
         <AppShell>{children}</AppShell>
       </body>
